@@ -1,0 +1,4 @@
+# Development / testing only
+pytest
+pytest-asyncio
+selenium   # only needed to import NiceGUI's testing plugin; Screen tests unused

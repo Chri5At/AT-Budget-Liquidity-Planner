@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------------------
+# PRIVATE PLANNING DATA — never commit. The app's database holds real figures.
+# ---------------------------------------------------------------------------
+# Ignore everything in data/ except the placeholder that keeps the folder.
+data/*
+!data/.gitkeep
+
+# Any database / spreadsheet / export anywhere in the tree
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.xlsm
+*.ods
+*.parquet
+*.bak
+*.backup
+
+# Internal design notes / working docs (kept private)
+.vibe/
+
+# ---------------------------------------------------------------------------
+# Secrets & environment
+# ---------------------------------------------------------------------------
+.env
+.env.*
+*.env
+secrets.*
+*.key
+*.pem
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# PyInstaller / installers — ship binaries via GitHub Releases, not the repo
+# ---------------------------------------------------------------------------
+build/
+dist/
+*.manifest
+# (keep *.spec — it is build source, not an artifact)
+# Installer outputs
+*.exe
+*.msi
+Output/
+installer/Output/
+
+# ---------------------------------------------------------------------------
+# Editor / OS / logs
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.log
+_server_test.log
+.DS_Store
+Thumbs.db

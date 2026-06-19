@@ -1,0 +1,30 @@
+[project]
+name = "budget-liquidity-planner"
+version = "0.1.0"
+description = "Budget- und Liquiditätsplanung für eine österreichische GmbH (NiceGUI + SQLite)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Chri5At" }]
+keywords = ["budget", "liquiditaet", "liquidity", "cashflow", "gmbh", "austria", "nicegui"]
+
+# Runtime dependencies (kept in sync with requirements.txt).
+dependencies = [
+    "nicegui==3.13.0",
+    "sqlmodel==0.0.38",
+    "holidays==0.99",
+    "python-dateutil==2.9.0.post0",
+]
+
+[dependency-groups]
+# Development / testing only (kept in sync with requirements-dev.txt).
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "selenium",
+]
+
+[tool.uv]
+# This is a runnable application, not a library to be built/installed.
+# `uv sync` therefore only resolves dependencies into the virtual environment.
+package = false
