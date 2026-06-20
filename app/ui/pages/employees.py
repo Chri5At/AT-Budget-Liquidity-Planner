@@ -242,31 +242,48 @@ def render() -> None:
         preview.refresh()
 
     def _fill_sonder() -> None:
-        """Set Jun/Nov Sonderzahlung to one month's ongoing gross (editable afterwards)."""
+        """Compute aliquot Urlaubs-/Weihnachtsgeld from the entered ongoing salary.
+
+        Austrian rule: each Sonderzahlung (13./14.) = annual ongoing gross / 12
+        (= one month's salary for a full year, pro-rated by months actually worked).
+        Only placed in months that are actually employed (gross > 0), so an
+        employee starting in Aug gets nothing in June.
+        """
         year = state["year"]
         with get_session() as s:
             for e in s.exec(select(Employee).where(Employee.is_contractor == False)).all():  # noqa: E712
                 months = {sm.month: sm for sm in s.exec(select(SalaryMonth).where(
                     SalaryMonth.employee_id == e.id, SalaryMonth.year == year)).all()}
-                base = 0.0
-                for m in range(1, 13):
-                    if m in SONDER_MONTHS:
-                        continue
-                    g = months.get(m).gross if months.get(m) else 0.0
-                    if g:
-                        base = g
-                        break
-                for m in SONDER_MONTHS:
+                # Clear any previous Sonderzahlungen first (idempotent re-run).
+                for sm in months.values():
+                    sm.special = 0.0
+                employed = sorted(m for m in range(1, 13)
+                                  if months.get(m) and months[m].gross > 0)
+                if not employed:
+                    continue
+                # Aliquot per Sonderzahlung = (sum of ongoing gross over the year) / 12.
+                aliquot = sum(months[m].gross for m in employed) / 12.0
+                # Urlaubsgeld → June if employed, else first employed month.
+                # Weihnachtsgeld → November if employed, else last employed month.
+                u_month = 6 if 6 in employed else employed[0]
+                w_month = 11 if 11 in employed else employed[-1]
+
+                def _add_special(m: int, amount: float) -> None:
                     sm = months.get(m)
                     if sm is None:
-                        s.add(SalaryMonth(employee_id=e.id, year=year, month=m,
-                                          gross=base, special=base))
-                    else:
-                        sm.special = base
+                        sm = SalaryMonth(employee_id=e.id, year=year, month=m,
+                                         gross=0.0, special=0.0)
+                        s.add(sm)
+                        months[m] = sm
+                    sm.special += amount
+
+                _add_special(u_month, aliquot)   # Urlaubsgeld
+                _add_special(w_month, aliquot)   # Weihnachtsgeld
             s.commit()
         special_matrix.refresh()
         preview.refresh()
-        ui.notify("Sonderzahlungen Jun/Nov = 1 Monatsgehalt gesetzt", type="positive")
+        ui.notify("Urlaubs- & Weihnachtsgeld aliquot berechnet (anteilig nach Dienstmonaten)",
+                  type="positive")
 
     def _add_dialog() -> None:
         with ui.dialog() as dialog, ui.card():
