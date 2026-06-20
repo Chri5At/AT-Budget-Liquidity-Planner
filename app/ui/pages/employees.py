@@ -219,14 +219,17 @@ def render() -> None:
         rows.append(mk("Σ Netto (alle MA)", tot_net, kind="subtotal"))
         rows.append(mk("Σ Gesamtkosten / Personalaufwand (alle MA)", tot_allin, kind="subtotal"))
 
+        # Deterministic height from row count (avoids autoHeight collapsing at 4K/high-DPI).
+        grid_h = 34 + max(1, len(rows)) * 30 + 20
         ui.aggrid({
             "columnDefs": col_defs,
             "rowData": rows,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
-            "domLayout": "autoHeight",
+            "rowHeight": 30,
+            "headerHeight": 34,
             ":rowClassRules": "{'font-bold bg-blue-50': p => p.data._kind === 'subtotal',"
                               " 'font-semibold bg-gray-100': p => p.data._kind === 'section'}",
-        }).classes("w-full").style("height: auto")
+        }).classes("w-full").style(f"height: {grid_h}px")
 
         ui.label(f"Jahr {year} — Brutto {eur(sum(tot_brutto))}  ·  Netto {eur(sum(tot_net))}  ·  "
                  f"Gesamtkosten {eur(sum(tot_allin))}  ·  Abgaben FA/ÖGK {eur(sum(tot_abg))}"

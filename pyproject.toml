@@ -1,12 +1,16 @@
 [project]
 name = "budget-liquidity-planner"
 version = "0.1.0"
-description = "Budget- und Liquiditätsplanung für eine österreichische GmbH (NiceGUI + SQLite)."
+description = "Budget- und Liquiditätsplanung für ein österreichisches Unternehmen (NiceGUI + SQLite)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Chri5At" }]
-keywords = ["budget", "liquiditaet", "liquidity", "cashflow", "gmbh", "austria", "nicegui"]
+keywords = [
+    "budget", "budgetplanung", "liquidity", "liquiditaetsplanung", "cashflow",
+    "cash-flow-forecast", "financial-planning", "finanzplanung", "accounting",
+    "austria", "oesterreich", "payroll", "kmu", "sme", "gmbh", "nicegui", "sqlite",
+]
 
 # Runtime dependencies (kept in sync with requirements.txt).
 dependencies = [

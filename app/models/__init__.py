@@ -8,6 +8,8 @@ from .enums import (  # noqa: F401
     PAYMENT_TERM_DE,
     PnlLine,
     PNL_LINE_DE,
+    RevenuePayRoutine,
+    REVENUE_PAY_ROUTINE_DE,
     RevenueType,
     REVENUE_TYPE_DE,
     SplitModel,

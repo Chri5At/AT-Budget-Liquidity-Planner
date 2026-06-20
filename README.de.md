@@ -2,8 +2,16 @@
 
 # Budget- & Liquiditätsplanung
 
-Lokale Web-App (NiceGUI + SQLite) für die **Budget- und Liquiditätsplanung einer
-österreichischen GmbH**. Sie ersetzt verknüpfte Excel-Dateien: **eine Datenbank
+**Kostenlose Open-Source-Software für Budget- und Liquiditätsplanung für
+österreichische Unternehmen.** Plane dein Budget, prognostiziere die Liquidität
+(Cashflow) und sieh deine Gewinn- und Verlustrechnung (GuV) — alles in einer
+lokalen App, als Excel-freie Alternative zur Finanzplanung. Mit integrierter
+österreichischer Lohn- und Abgabenlogik (ÖGK / Finanzamt) und Banktag-Regeln —
+passend für GmbHs, Start-ups und KMU in Österreich.
+
+Lokale Web-App (NiceGUI + SQLite) für die **Budget- und Liquiditätsplanung eines
+österreichischen Unternehmens** (jede Rechtsform — GmbH, Einzelunternehmen usw.).
+Sie ersetzt verknüpfte Excel-Dateien: **eine Datenbank
 ist die einzige Quelle der Wahrheit**, GuV (Budget) und Liquidität sind nur zwei
 *Sichten* auf dieselben Daten — keine fragilen Querverweise, kein `#REF!`.
 
@@ -69,6 +77,10 @@ erstellt mit PyInstaller)** geplant. Sobald verfügbar, findest du sie unter
   automatisch berechnet.
 - **Liquidität** — Geldfluss in 15.-/Monatsende-Buckets mit laufendem
   Kontostand (mit & ohne EU-Förderung) und Verlaufsgrafik.
+- **Szenarien** — ein Basis-Plan plus abgeleitete Was-wäre-wenn-Szenarien. Ein
+  abgeleitetes Szenario erbt alle Einnahmen/Kosten der Basis; einzelne
+  Basis-Positionen lassen sich ab-/zuschalten und eigene hinzufügen — der Effekt
+  wird in GuV und Liquidität verglichen.
 - **Einstellungen** — Aufteilungsmodell, Prozentsätze, Anfangskontostand,
   Planungszeitraum.
 
@@ -77,14 +89,16 @@ erstellt mit PyInstaller)** geplant. Sobald verfügbar, findest du sie unter
 Pro Monat wird das Bruttogehalt aufgeteilt:
 - **Netto** → Auszahlung am **letzten Banktag** des Monats.
 - **Abgaben** (Finanzamt / ÖGK) → **15. des Folgemonats** (bei Wochenende/
-  Feiertag in Oberösterreich der vorherige Banktag).
+  Feiertag in Österreich der vorherige Banktag).
 
 Zwei umschaltbare Modelle (Einstellungen):
 - **Fixer Prozentsatz** (Standard): Abgaben = Gesamtkosten × Abgaben-% (Default 30 %).
 - **Buchhalterisch genau**: Abgaben = Brutto + LNK − Netto.
 
-> Die Lohn-/Abgabenlogik (ÖGK, Finanzamt-Termine, Feiertage Oberösterreich) ist
-> **Österreich-spezifisch**. Für andere Länder müssten diese Regeln angepasst werden.
+> Die Lohn-/Abgabenlogik (ÖGK, Finanzamt-Termine, österreichische Feiertage) ist
+> **Österreich-spezifisch** (das Bundesland für regionale Feiertage ist
+> einstellbar, Standard: Oberösterreich). Für andere Länder müssten diese Regeln
+> angepasst werden.
 
 ## Tests
 

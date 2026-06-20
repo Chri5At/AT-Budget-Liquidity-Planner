@@ -2,8 +2,16 @@
 
 # Budget & Liquidity Planner
 
+**Free, open-source budget and liquidity planning software for Austrian
+businesses.** Plan your budget, forecast cash flow (liquidity), and see your
+profit & loss (P&L / GuV) in one local app — an Excel-free alternative for
+financial planning. Built-in Austrian payroll, tax (ÖGK / Finanzamt) and
+banking-day rules make it a fit for GmbHs, startups and small and medium-sized
+businesses (KMU / SME) in Austria.
+
 A local web app (NiceGUI + SQLite) for **budget and liquidity planning of an
-Austrian GmbH** (limited liability company). It replaces linked Excel files:
+Austrian company** (any legal form — GmbH, sole proprietor, etc.). It replaces
+linked Excel files:
 **one database is the single source of truth**, while the P&L (income statement)
 and the liquidity plan are just two *views* of the same data — no fragile
 cross-references, no `#REF!`.
@@ -18,8 +26,10 @@ any third party.
 > `data/planung.sqlite`, which is **never** committed to Git (see `.gitignore`).
 
 > **Note:** The UI is in **German** (Austrian terminology), and the payroll/tax
-> logic is **Austria-specific** (ÖGK, tax-office deadlines, public holidays for
-> Upper Austria). For other countries these rules would need to be adapted.
+> logic is **Austria-specific** (ÖGK, tax-office deadlines, Austrian public
+> holidays — the federal state used for regional holidays defaults to Upper
+> Austria and is configurable). For other countries these rules would need to be
+> adapted.
 
 ## Quick start (Windows)
 
@@ -73,6 +83,10 @@ with PyInstaller)** are planned. Once available they will be published under
   EBT), calculated automatically.
 - **Liquidität** (Liquidity) — cash flow in 15th-of-month / month-end buckets
   with a running balance (with & without EU funding) and a trend chart.
+- **Szenarien** (Scenarios) — a base plan plus derived what-if scenarios. A
+  derived scenario inherits all revenue/cost items from the base; you can switch
+  individual base items on/off and add your own, then compare the effect in the
+  GuV (P&L) and Liquidität tabs.
 - **Einstellungen** (Settings) — split model, percentages, opening balance,
   planning horizon.
 
@@ -81,8 +95,8 @@ with PyInstaller)** are planned. Once available they will be published under
 Each month the gross salary is split into:
 - **Net** → paid out on the **last banking day** of the month.
 - **Contributions** (tax office / ÖGK) → due on the **15th of the following
-  month** (moved to the previous banking day if that falls on a weekend or a
-  public holiday in Upper Austria).
+  month** (moved to the previous banking day if that falls on a weekend or an
+  Austrian public holiday).
 
 Two switchable models (in Settings):
 - **Fixed percentage** (default): contributions = total cost × contribution-%

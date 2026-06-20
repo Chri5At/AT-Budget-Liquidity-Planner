@@ -52,8 +52,8 @@ def render() -> None:
         ui.aggrid({
             "columnDefs": col_defs, "rowData": row_data,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
-            "domLayout": "autoHeight",
-        }).classes("w-full max-w-4xl").style("height: auto")
+            "rowHeight": 30, "headerHeight": 34,
+        }).classes("w-full max-w-4xl").style(f"height: {34 + max(1, len(row_data)) * 30 + 20}px")
 
     @ui.refreshable
     def table() -> None:

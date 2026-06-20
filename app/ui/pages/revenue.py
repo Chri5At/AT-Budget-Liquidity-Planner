@@ -7,15 +7,19 @@ from sqlmodel import select
 from ...db import get_session
 from ...models import (
     RevenueCellEntry,
+    RevenuePayRoutine,
     RevenuePlanMonth,
     RevenueStream,
     RevenueType,
     ScenarioDisable,
 )
-from ...models.enums import REVENUE_TYPE_DE, TERM_DAYS
+from ...models.enums import REVENUE_PAY_ROUTINE_DE, REVENUE_TYPE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
 from ..formatting import MONTHS_DE, YEARS, eur
 from ..components.scenario_ui import base_toggle_panel, scenario_select
+
+# Routines that need a deposit field, and the one that needs Raten/Laufzeit.
+_DEPOSIT_ROUTINES = (RevenuePayRoutine.DEPOSIT_REST, RevenuePayRoutine.INSTALLMENTS)
 
 # Preset cell background colours (label → CSS).
 CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
@@ -166,9 +170,10 @@ def render() -> None:
             "columnDefs": col_defs, "rowData": rows,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
-            "rowDragManaged": True, "animateRows": True, "domLayout": "autoHeight",
+            "rowDragManaged": True, "animateRows": True,
+            "rowHeight": 30, "headerHeight": 34,
             ":getRowId": "params => String(params.data.id)",
-        }).classes("w-full").style("height: auto")
+        }).classes("w-full").style(f"height: {34 + max(1, len(rows)) * 30 + 20}px")
         grid.on("cellValueChanged", _on_cell_edit)
         grid.on("cellDoubleClicked", _on_cell_dblclick)
         grid.on("rowDragEnd", _on_drag_end)
@@ -223,18 +228,30 @@ def render() -> None:
                 return
             is_product = stream.rtype == RevenueType.PRODUCT
             sname = stream.name
+            default_days = _stream_days(stream)
             pm = s.exec(select(RevenuePlanMonth).where(
                 RevenuePlanMonth.stream_id == stream_id, RevenuePlanMonth.year == year,
                 RevenuePlanMonth.month == month)).first()
             note0 = pm.note if pm else ""
             color0 = pm.color if pm else ""
-            items = [{"qty": e.qty, "price": e.price, "amount": e.amount, "note": e.note}
+            amount0 = pm.amount if pm else 0.0
+            items = [{"qty": e.qty, "price": e.price, "amount": e.amount, "note": e.note,
+                      "routine": e.pay_routine,
+                      "pdays": e.payment_days if e.payment_days is not None else default_days,
+                      "dep_pct": e.deposit_is_pct, "dep_val": e.deposit_value,
+                      "rates": e.rate_count, "months": e.rate_months}
                      for e in s.exec(select(RevenueCellEntry).where(
                          RevenueCellEntry.stream_id == stream_id, RevenueCellEntry.year == year,
                          RevenueCellEntry.month == month).order_by(
                          RevenueCellEntry.sort_order, RevenueCellEntry.id)).all()]
+
+        def _new_item() -> dict:
+            return {"qty": 0.0, "price": 0.0, "amount": 0.0, "note": "",
+                    "routine": RevenuePayRoutine.ON_DELIVERY, "pdays": default_days,
+                    "dep_pct": True, "dep_val": 0.0, "rates": 3, "months": 6}
+
         if not items:
-            items = [{"qty": 0.0, "price": 0.0, "amount": 0.0, "note": ""}]
+            items = [_new_item()]
         modal = {"color": color0}
 
         def _total() -> float:
@@ -242,93 +259,150 @@ def render() -> None:
                 return sum((it["qty"] or 0) * (it["price"] or 0) for it in items)
             return sum((it["amount"] or 0) for it in items)
 
-        with ui.dialog() as dlg, ui.card().classes("min-w-[700px]"):
+        has_list = any((it["qty"] or it["price"] or it["amount"] or it["note"]) for it in items)
+        modal["use_list"] = has_list
+
+        with ui.dialog() as dlg, ui.card().classes("min-w-[760px]"):
             ui.label(f"{sname} — {MONTHS_DE[month - 1]} {year}").classes("text-lg font-bold")
-            ui.label("Detail-Aufstellung — die Summe ergibt den Zellenwert.").classes(
-                "text-xs text-gray-500")
-            total_label = ui.label().classes("text-sm font-semibold")
-            total_label.text = f"Summe: {eur(_total())}"
 
-            def _refresh_total() -> None:
-                total_label.text = f"Summe: {eur(_total())}"
+            # (1) Single cell value at the top — used when no detail list is active.
+            with ui.row().classes("items-center gap-3"):
+                single_in = ui.number("Einzelwert (€)", value=round(amount0), step=100,
+                                      ).props("dense outlined").classes("w-44")
+                use_list_sw = ui.switch("Detail-Aufstellung verwenden", value=has_list)
 
-            @ui.refreshable
-            def lines() -> None:
-                with ui.row().classes("items-center gap-2 text-xs text-gray-500 font-medium"):
-                    if is_product:
-                        ui.label("Menge").classes("w-24")
-                        ui.label("Preis").classes("w-24")
-                        ui.label("Notiz").classes("w-72")
-                    else:
-                        ui.label("Betrag").classes("w-32")
-                        ui.label("Notiz").classes("w-80")
-                    ui.label("").classes("w-8")
-                for it in items:
-                    with ui.row().classes("items-center gap-2"):
-                        if is_product:
-                            ui.number(value=it["qty"], step=1,
-                                      on_change=lambda e, it=it: (it.__setitem__("qty", e.value or 0),
-                                                                  _refresh_total())
-                                      ).props("dense outlined").classes("w-24")
-                            ui.number(value=it["price"], step=1,
-                                      on_change=lambda e, it=it: (it.__setitem__("price", e.value or 0),
-                                                                  _refresh_total())
-                                      ).props("dense outlined").classes("w-24")
-                            ui.input(value=it["note"],
-                                     on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
-                                     ).props("dense outlined").classes("w-72")
-                        else:
-                            ui.number(value=it["amount"], step=100,
-                                      on_change=lambda e, it=it: (it.__setitem__("amount", e.value or 0),
-                                                                  _refresh_total())
-                                      ).props("dense outlined").classes("w-32")
-                            ui.input(value=it["note"],
-                                     on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
-                                     ).props("dense outlined").classes("w-80")
-
-                        def _remove(it=it) -> None:
-                            items.remove(it)
-                            if not items:
-                                items.append({"qty": 0.0, "price": 0.0, "amount": 0.0, "note": ""})
-                            lines.refresh()
-                            _refresh_total()
-
-                        ui.button(icon="close", on_click=_remove).props("flat round dense").classes("w-8")
-
-            lines()
-
-            def _add_line() -> None:
-                items.append({"qty": 0.0, "price": 0.0, "amount": 0.0, "note": ""})
-                lines.refresh()
-
-            with ui.row().classes("items-center gap-3 mt-2"):
-                ui.button("Zeile hinzufügen", icon="add", on_click=_add_line).props("flat")
-                note_in = ui.input("Notiz (Zelle)", value=note0).classes("w-64")
+            # (2) Allgemeine Notiz, (3) Zellenfarbe
+            with ui.row().classes("items-center gap-3 mt-1"):
+                note_in = ui.input("Allgemeine Notiz", value=note0).classes("w-80")
                 ui.select(CELL_COLORS, value=color0, label="Zellenfarbe",
                           on_change=lambda e: modal.update(color=e.value)
                           ).props("dense outlined").classes("w-40")
+
+            # (4) the detail list
+            list_box = ui.column().classes("w-full mt-2")
+            total_label = ui.label().classes("text-sm font-semibold")
+
+            def _refresh_total() -> None:
+                total_label.text = f"Summe Aufstellung: {eur(_total())}"
+
+            @ui.refreshable
+            def lines() -> None:
+                for idx, it in enumerate(items):
+                    with ui.card().classes("w-full p-2 gap-1"):
+                        with ui.row().classes("items-center gap-2"):
+                            if is_product:
+                                ui.number("Menge", value=it["qty"], step=1,
+                                          on_change=lambda e, it=it: (it.__setitem__("qty", e.value or 0),
+                                                                      _refresh_total())
+                                          ).props("dense outlined").classes("w-24")
+                                ui.number("Preis", value=it["price"], step=1,
+                                          on_change=lambda e, it=it: (it.__setitem__("price", e.value or 0),
+                                                                      _refresh_total())
+                                          ).props("dense outlined").classes("w-28")
+                                ui.label(f"= {eur((it['qty'] or 0) * (it['price'] or 0))}").classes(
+                                    "text-xs text-gray-500 w-28")
+                                ui.input("Notiz", value=it["note"],
+                                         on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
+                                         ).props("dense outlined").classes("w-64")
+                            else:
+                                ui.number("Betrag", value=it["amount"], step=100,
+                                          on_change=lambda e, it=it: (it.__setitem__("amount", e.value or 0),
+                                                                      _refresh_total())
+                                          ).props("dense outlined").classes("w-32")
+                                ui.input("Notiz", value=it["note"],
+                                         on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
+                                         ).props("dense outlined").classes("w-80")
+
+                            def _remove(it=it) -> None:
+                                items.remove(it)
+                                if not items:
+                                    items.append(_new_item())
+                                lines.refresh()
+                                _refresh_total()
+
+                            ui.button(icon="close", on_click=_remove).props("flat round dense")
+
+                        if is_product:
+                            _product_payment_row(it)
+
+            def _product_payment_row(it: dict) -> None:
+                with ui.row().classes("items-center gap-2"):
+                    ui.select({r: REVENUE_PAY_ROUTINE_DE[r] for r in RevenuePayRoutine},
+                              value=it["routine"], label="Zahlungsweise",
+                              on_change=lambda e, it=it: (it.__setitem__("routine", RevenuePayRoutine(e.value)),
+                                                          lines.refresh())
+                              ).props("dense outlined").classes("w-72")
+                    if it["routine"] != RevenuePayRoutine.ON_ORDER:
+                        ui.number("Zahlungsziel (Tage)", value=it["pdays"], min=0, max=365, step=1,
+                                  on_change=lambda e, it=it: it.__setitem__("pdays", int(e.value or 0))
+                                  ).props("dense outlined").classes("w-36")
+                    if it["routine"] in _DEPOSIT_ROUTINES:
+                        ui.number("Anzahlung", value=it["dep_val"], min=0, step=1,
+                                  on_change=lambda e, it=it: it.__setitem__("dep_val", e.value or 0)
+                                  ).props("dense outlined").classes("w-28")
+                        ui.toggle({True: "%", False: "€"}, value=it["dep_pct"],
+                                  on_change=lambda e, it=it: it.__setitem__("dep_pct", bool(e.value))
+                                  ).props("dense")
+                    if it["routine"] == RevenuePayRoutine.INSTALLMENTS:
+                        ui.number("Raten", value=it["rates"], min=1, max=60, step=1,
+                                  on_change=lambda e, it=it: it.__setitem__("rates", int(e.value or 1))
+                                  ).props("dense outlined").classes("w-24")
+                        ui.number("Laufzeit (Mon.)", value=it["months"], min=1, max=120, step=1,
+                                  on_change=lambda e, it=it: it.__setitem__("months", int(e.value or 1))
+                                  ).props("dense outlined").classes("w-32")
+
+            with list_box:
+                lines()
+
+                def _add_line() -> None:
+                    items.append(_new_item())
+                    lines.refresh()
+
+                with ui.row().classes("items-center gap-3 mt-1"):
+                    ui.button("Zeile hinzufügen", icon="add", on_click=_add_line).props("flat")
+                    total_label
+            _refresh_total()
+
+            def _toggle_list(e) -> None:
+                modal["use_list"] = bool(e.value)
+                list_box.set_visibility(bool(e.value))
+                single_in.set_visibility(not bool(e.value))
+            use_list_sw.on_value_change(_toggle_list)
+            list_box.set_visibility(has_list)
+            single_in.set_visibility(not has_list)
 
             with ui.row().classes("mt-2"):
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
                 def _save() -> None:
+                    use_list = modal["use_list"]
                     with get_session() as s:
                         for e in s.exec(select(RevenueCellEntry).where(
                                 RevenueCellEntry.stream_id == stream_id,
                                 RevenueCellEntry.year == year,
                                 RevenueCellEntry.month == month)).all():
                             s.delete(e)
-                        kept = [it for it in items if (it["qty"] or it["price"] or it["amount"] or it["note"])]
-                        for i, it in enumerate(kept):
-                            s.add(RevenueCellEntry(
-                                stream_id=stream_id, year=year, month=month, sort_order=i,
-                                qty=float(it["qty"] or 0), price=float(it["price"] or 0),
-                                amount=float(it["amount"] or 0), note=it["note"] or ""))
                         pm2 = _cell_pm(s, stream_id, year, month)
+                        if use_list:
+                            kept = [it for it in items
+                                    if (it["qty"] or it["price"] or it["amount"] or it["note"])]
+                            for i, it in enumerate(kept):
+                                s.add(RevenueCellEntry(
+                                    stream_id=stream_id, year=year, month=month, sort_order=i,
+                                    qty=float(it["qty"] or 0), price=float(it["price"] or 0),
+                                    amount=float(it["amount"] or 0), note=it["note"] or "",
+                                    pay_routine=it["routine"], payment_days=int(it["pdays"] or 0),
+                                    deposit_is_pct=bool(it["dep_pct"]),
+                                    deposit_value=float(it["dep_val"] or 0),
+                                    rate_count=int(it["rates"] or 0), rate_months=int(it["months"] or 0)))
+                        else:
+                            pm2.amount = float(single_in.value or 0)
+                            pm2.units = 0.0
                         pm2.note = note_in.value or ""
                         pm2.color = modal["color"] or ""
                         s.commit()
-                        _recompute_cell(s, s.get(RevenueStream, stream_id), year, month)
+                        if use_list:
+                            _recompute_cell(s, s.get(RevenueStream, stream_id), year, month)
                     recompute_all()
                     dlg.close()
                     matrix.refresh()
