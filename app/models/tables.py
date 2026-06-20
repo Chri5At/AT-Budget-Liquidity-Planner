@@ -18,6 +18,7 @@ from .enums import (
     OpexCategory,
     PaymentTerm,
     PnlLine,
+    RevenuePayRoutine,
     RevenueType,
     SplitModel,
 )
@@ -119,6 +120,9 @@ class RevenueCellEntry(SQLModel, table=True):
 
     For Produkt streams the line value is qty*price; for other types it is `amount`.
     The owning RevenuePlanMonth.amount is recomputed as the sum of its lines.
+
+    Produkt lines also carry a payment routine that drives *liquidity* timing only
+    (the GuV always books the full line value in the cell month — accrual).
     """
     id: Optional[int] = Field(default=None, primary_key=True)
     stream_id: int = Field(foreign_key="revenuestream.id", index=True)
@@ -129,6 +133,13 @@ class RevenueCellEntry(SQLModel, table=True):
     price: float = 0.0      # Preis
     amount: float = 0.0     # Betrag (non-product types)
     note: str = ""          # Notiz
+    # --- Produkt payment routine (liquidity timing) ----------------------------
+    pay_routine: RevenuePayRoutine = Field(default=RevenuePayRoutine.ON_DELIVERY)
+    payment_days: Optional[int] = None   # Zahlungsziel for this line; None = stream default
+    deposit_is_pct: bool = True          # Anzahlung as % (True) or fixed € (False)
+    deposit_value: float = 0.0           # the % (0-100) or € amount
+    rate_count: int = 0                  # Anzahl Raten (installments)
+    rate_months: int = 0                 # Laufzeit in Monaten (span of the installments)
 
 
 class CostCategory(SQLModel, table=True):

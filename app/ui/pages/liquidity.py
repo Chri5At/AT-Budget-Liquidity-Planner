@@ -107,8 +107,8 @@ def render() -> None:
                 "columnDefs": col_defs,
                 "rowData": row_data,
                 "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
-                "domLayout": "autoHeight",
-            }).classes("w-full").style("height: auto")
+                "rowHeight": 30, "headerHeight": 34,
+            }).classes("w-full").style(f"height: {34 + max(1, len(row_data)) * 30 + 20}px")
 
     @ui.refreshable
     def investments_panel() -> None:

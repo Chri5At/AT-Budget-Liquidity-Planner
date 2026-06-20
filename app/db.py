@@ -39,6 +39,16 @@ def _migrate() -> bool:
         # Per-cell note + colour for the Einnahmen grid.
         _add_column_if_missing(conn, "revenueplanmonth", "note", "note VARCHAR DEFAULT ''")
         _add_column_if_missing(conn, "revenueplanmonth", "color", "color VARCHAR DEFAULT ''")
+        # Produkt line-item payment routine (liquidity timing).
+        _add_column_if_missing(conn, "revenuecellentry", "pay_routine",
+                               "pay_routine VARCHAR DEFAULT 'on_delivery'")
+        _add_column_if_missing(conn, "revenuecellentry", "payment_days", "payment_days INTEGER")
+        _add_column_if_missing(conn, "revenuecellentry", "deposit_is_pct",
+                               "deposit_is_pct BOOLEAN DEFAULT 1")
+        _add_column_if_missing(conn, "revenuecellentry", "deposit_value",
+                               "deposit_value FLOAT DEFAULT 0")
+        _add_column_if_missing(conn, "revenuecellentry", "rate_count", "rate_count INTEGER DEFAULT 0")
+        _add_column_if_missing(conn, "revenuecellentry", "rate_months", "rate_months INTEGER DEFAULT 0")
         if "salarymonth" in inspect(conn).get_table_names():
             cols = {c["name"] for c in inspect(conn).get_columns("salarymonth")}
             if "special" not in cols:

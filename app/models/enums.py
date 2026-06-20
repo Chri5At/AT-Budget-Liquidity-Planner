@@ -73,6 +73,14 @@ class LoanKind(str, Enum):
     BANK_LOAN = "bank_loan"
 
 
+class RevenuePayRoutine(str, Enum):
+    """How a product line item is paid — drives liquidity timing only (not GuV)."""
+    ON_ORDER = "on_order"          # Bei Bestellung (sofort im Zellmonat)
+    ON_DELIVERY = "on_delivery"    # Bei Lieferung (Zellmonat + Zahlungsziel)
+    DEPOSIT_REST = "deposit_rest"  # Anzahlung sofort, Rest bei Lieferung
+    INSTALLMENTS = "installments"  # Anzahlung sofort, Raten ab Lieferung
+
+
 TERM_DAYS = {
     PaymentTerm.SOFORT: 0,
     PaymentTerm.NET15: 15,
@@ -108,4 +116,10 @@ LOAN_KIND_DE = {
     LoanKind.OWNER_LOAN: "Gesellschafterdarlehen",
     LoanKind.GF_LOAN: "GF-Darlehen",
     LoanKind.BANK_LOAN: "Bankdarlehen",
+}
+REVENUE_PAY_ROUTINE_DE = {
+    RevenuePayRoutine.ON_ORDER: "Bei Bestellung (sofort)",
+    RevenuePayRoutine.ON_DELIVERY: "Bei Lieferung (Zahlungsziel)",
+    RevenuePayRoutine.DEPOSIT_REST: "Anzahlung sofort, Rest bei Lieferung",
+    RevenuePayRoutine.INSTALLMENTS: "Ratenzahlung (Anzahlung + Raten)",
 }

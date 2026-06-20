@@ -25,8 +25,10 @@ from ..models import (
     LoanKind,
     LoanSchedule,
     PnlLine,
+    RevenueCellEntry,
     RevenuePlanMonth,
     RevenueStream,
+    RevenueType,
     SalaryMonth,
 )
 from ..models.enums import TERM_DAYS
@@ -42,6 +44,7 @@ from .calendar_at import (
     vat_due_date,
 )
 from .payroll_at import employee_year_cost, ruleset_for_year
+from .revenue_terms import product_line_cashflows
 from .scenarios import effective_cost_ids, effective_revenue_ids, get_scenario
 
 
@@ -111,17 +114,39 @@ def build_entries(session: Session, scenario_id: int = 1) -> list[CashflowEntry]
 
     # --- Revenue ---------------------------------------------------------------
     streams = {s.id: s for s in session.exec(select(RevenueStream)).all()}
+    # Product line items, grouped by cell, for routine-driven timing.
+    cell_lines: dict[tuple[int, int, int], list] = defaultdict(list)
+    for ce in session.exec(select(RevenueCellEntry)).all():
+        cell_lines[(ce.stream_id, ce.year, ce.month)].append(ce)
     for rp in session.exec(select(RevenuePlanMonth)).all():
         stream = streams.get(rp.stream_id)
         if (stream is None or not rp.amount or rp.stream_id not in rev_ids
                 or not month_in_horizon(rp.year, rp.month, settings)):
             continue
-        inv = last_day_of_month(rp.year, rp.month)
-        days = stream.payment_days if stream.payment_days is not None else TERM_DAYS[stream.payment_term]
-        cash = shift_by_days(inv, days, subdiv)
-        entries.append(CashflowEntry(
-            date=cash, kind=CashflowKind.REVENUE_IN, amount=+rp.amount,
-            source_kind="revenue", source_id=stream.id, memo=stream.name))
+        stream_days = (stream.payment_days if stream.payment_days is not None
+                       else TERM_DAYS[stream.payment_term])
+        lines = cell_lines.get((rp.stream_id, rp.year, rp.month))
+        if stream.rtype == RevenueType.PRODUCT and lines:
+            # Expand each product line by its payment routine (deposit/installments…).
+            for ln in lines:
+                total = ln.qty * ln.price
+                if not total:
+                    continue
+                pdays = ln.payment_days if ln.payment_days is not None else stream_days
+                for bit in product_line_cashflows(
+                        rp.year, rp.month, total, ln.pay_routine, payment_days=pdays,
+                        deposit_is_pct=ln.deposit_is_pct, deposit_value=ln.deposit_value,
+                        rate_count=ln.rate_count, rate_months=ln.rate_months, subdiv=subdiv):
+                    memo = stream.name + (f" · {bit.label}" if bit.label else "")
+                    entries.append(CashflowEntry(
+                        date=bit.date, kind=CashflowKind.REVENUE_IN, amount=+bit.amount,
+                        source_kind="revenue", source_id=stream.id, memo=memo))
+        else:
+            cash = shift_by_days(last_day_of_month(rp.year, rp.month), stream_days, subdiv)
+            entries.append(CashflowEntry(
+                date=cash, kind=CashflowKind.REVENUE_IN, amount=+rp.amount,
+                source_kind="revenue", source_id=stream.id, memo=stream.name))
+        # VAT settles on the invoice month regardless of collection timing.
         if stream.is_vatable:
             vat_by_month[(rp.year, rp.month)] += rp.amount * VAT_RATE
 

@@ -16,6 +16,11 @@ _MONEY_FMT = ("params => (params.value==null||params.value==='') ? '' : "
               "Number(params.value).toLocaleString('de-DE',{maximumFractionDigits:0})+' €'")
 _NUM_PARSER = "params => (params.newValue===''||params.newValue==null) ? 0 : Number(params.newValue)"
 
+# Fixed grid metrics so the host height can be computed deterministically.
+_ROW_H = 30
+_HEADER_H = 34
+_GRID_CHROME = 20   # header border + horizontal scrollbar allowance
+
 
 def editable_month_grid(rows: list[dict], lead_cols: list[dict],
                         on_row_change: Callable[[dict], None],
@@ -39,13 +44,17 @@ def editable_month_grid(rows: list[dict], lead_cols: list[dict],
         "defaultColDef": {"resizable": True, "sortable": False, "suppressMovable": True},
         "singleClickEdit": True,
         "stopEditingWhenCellsLoseFocus": True,
+        "rowHeight": _ROW_H,
+        "headerHeight": _HEADER_H,
     }
-    if not fill_height:
-        # Size exactly to content (page scrolls); used where elements follow below.
-        options["domLayout"] = "autoHeight"
-        grid = ui.aggrid(options).classes("w-full").style("height: auto")
-    else:
+    if fill_height:
         # Fill the remaining viewport height down to the bottom, scroll inside the grid.
         grid = ui.aggrid(options).classes("w-full").style("height: calc(100vh - 300px); min-height: 320px")
+    else:
+        # Deterministic height from the row count — avoids ag-Grid autoHeight
+        # mis-measuring at high-DPI/4K (which collapsed the host and overlapped the
+        # element below it).
+        height = _HEADER_H + max(1, len(rows)) * _ROW_H + _GRID_CHROME
+        grid = ui.aggrid(options).classes("w-full").style(f"height: {height}px")
     grid.on("cellValueChanged", lambda e: on_row_change(e.args["data"]))
     return grid
