@@ -27,13 +27,28 @@ CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
 
 # ag-Grid cell JS: numeric parser, per-cell colour, value + marker dot renderer.
 _CELL_PARSER = 'params => (params.newValue===""||params.newValue==null)?0:Number(params.newValue)'
-_CELL_STYLE = ('params => { var c = params.data["color"+params.colDef.field.substring(1)];'
-               ' return c?{backgroundColor:c}:null; }')
+# Month cells: category rows are bold (row colour comes from getRowStyle);
+# data cells get their own per-cell colour.
+_CELL_STYLE = (
+    'params => { if (params.data.kind === "category") return {fontWeight:"bold"};'
+    ' var c = params.data["color"+params.colDef.field.substring(1)];'
+    ' return c?{backgroundColor:c}:null; }')
+# Whole-row background: a category's chosen colour (or a default tint) tints the row.
+_ROW_STYLE = ('params => params.data.kind === "category" '
+              '? {backgroundColor: params.data.row_color || "#eef2ff"} : null')
 _CELL_RENDER = (
     'params => { var f=params.colDef.field.substring(1);'
     ' var v=(params.value!=null&&params.value!=="")?Math.round(params.value).toLocaleString("de-DE")+" €":"";'
     ' return params.data["mark"+f] ? v+" <span style=\'color:#1976d2;font-weight:bold\''
     ' title=\'Detail/Notiz – Doppelklick\'>•</span>" : v; }')
+# Name cell: expand/collapse caret for categories, indent for child/direct lines.
+_NAME_RENDER = (
+    'params => { var k=params.data.kind, nm=params.data.name||"";'
+    ' if (k==="category"){ var ic=params.data.expanded?"▼":"▶";'
+    '   return "<span style=\'cursor:pointer;font-weight:bold\'>"+ic+" "+nm+"</span>"; }'
+    ' if (k==="child"||k==="direct"){'
+    '   return "<span style=\'padding-left:16px;color:#374151\'>"+nm+"</span>"; }'
+    ' return nm; }')
 
 
 def _stream_days(st: RevenueStream) -> int:
@@ -67,6 +82,38 @@ def _recompute_cell(s, stream: RevenueStream, year: int, month: int) -> None:
     s.commit()
 
 
+def _apply_cell_content(s, stream: RevenueStream, year: int, month: int, *,
+                        use_list: bool, items: list[dict], note: str, color: str,
+                        single_value) -> None:
+    """Write a cell's full content (line breakdown or single value + note + colour).
+
+    Used both when saving a cell and when copying it to other months.
+    """
+    for e in s.exec(select(RevenueCellEntry).where(
+            RevenueCellEntry.stream_id == stream.id, RevenueCellEntry.year == year,
+            RevenueCellEntry.month == month)).all():
+        s.delete(e)
+    pm = _cell_pm(s, stream.id, year, month)
+    if use_list:
+        kept = [it for it in items if (it["qty"] or it["price"] or it["amount"] or it["note"])]
+        for i, it in enumerate(kept):
+            s.add(RevenueCellEntry(
+                stream_id=stream.id, year=year, month=month, sort_order=i,
+                qty=float(it["qty"] or 0), price=float(it["price"] or 0),
+                amount=float(it["amount"] or 0), note=it["note"] or "",
+                pay_routine=it["routine"], payment_days=int(it["pdays"] or 0),
+                deposit_is_pct=bool(it["dep_pct"]), deposit_value=float(it["dep_val"] or 0),
+                rate_count=int(it["rates"] or 0), rate_months=int(it["months"] or 0)))
+    else:
+        pm.amount = float(single_value or 0)
+        pm.units = 0.0
+    pm.note = note or ""
+    pm.color = color or ""
+    s.commit()
+    if use_list:
+        _recompute_cell(s, stream, year, month)
+
+
 def _save_amount_cell(stream_id: int, year: int, month: int, amount: float) -> None:
     """Direct (single-click) edit: set the value and drop any line breakdown."""
     with get_session() as s:
@@ -90,23 +137,69 @@ def _save_name_cell(stream_id: int, name: str) -> None:
             s.commit()
 
 
-def _load_rows(year: int, scenario_id: int) -> list[dict]:
+def _data_row(s, st: RevenueStream, year: int, kind: str, *, name: str | None = None) -> dict:
+    """A normal editable data row (leaf / child / direct) for one stream."""
+    months = {p.month: p for p in s.exec(select(RevenuePlanMonth).where(
+        RevenuePlanMonth.stream_id == st.id, RevenuePlanMonth.year == year)).all()}
+    ent_months = {e.month for e in s.exec(select(RevenueCellEntry).where(
+        RevenueCellEntry.stream_id == st.id, RevenueCellEntry.year == year)).all()}
+    row = {"rid": f"{kind}-{st.id}", "id": st.id, "kind": kind,
+           "name": name if name is not None else st.name,
+           "typ": REVENUE_TYPE_DE[st.rtype]}
+    for m in range(1, 13):
+        pm = months.get(m)
+        row[f"m{m}"] = round(pm.amount) if pm else 0
+        row[f"color{m}"] = pm.color if pm else ""
+        row[f"mark{m}"] = bool((pm and pm.note) or m in ent_months)
+        # Cells with a line-item breakdown are locked against single-click edits
+        # (editing would discard the breakdown) — edit them via double-click.
+        row[f"detail{m}"] = m in ent_months
+    return row
+
+
+def _own_amounts(s, stream_id: int, year: int) -> list[float]:
+    months = {p.month: p.amount for p in s.exec(select(RevenuePlanMonth).where(
+        RevenuePlanMonth.stream_id == stream_id, RevenuePlanMonth.year == year)).all()}
+    return [round(months.get(m, 0.0)) for m in range(1, 13)]
+
+
+def _load_tree_rows(year: int, scenario_id: int, collapsed: set) -> list[dict]:
+    """Flat, tree-ordered rows: categories (with summed children) then their lines."""
     with get_session() as s:
-        streams = [st for st in s.exec(select(RevenueStream).order_by(
+        scoped = [st for st in s.exec(select(RevenueStream).order_by(
             RevenueStream.sort_order, RevenueStream.id)).all() if st.scenario_id == scenario_id]
-        rows = []
-        for st in streams:
-            months = {p.month: p for p in s.exec(select(RevenuePlanMonth).where(
-                RevenuePlanMonth.stream_id == st.id, RevenuePlanMonth.year == year)).all()}
-            ent_months = {e.month for e in s.exec(select(RevenueCellEntry).where(
-                RevenueCellEntry.stream_id == st.id, RevenueCellEntry.year == year)).all()}
-            row = {"id": st.id, "name": st.name, "typ": REVENUE_TYPE_DE[st.rtype]}
-            for m in range(1, 13):
-                pm = months.get(m)
-                row[f"m{m}"] = round(pm.amount) if pm else 0
-                row[f"color{m}"] = pm.color if pm else ""
-                row[f"mark{m}"] = bool((pm and pm.note) or m in ent_months)
-            rows.append(row)
+        children_of: dict[int, list] = {}
+        tops = []
+        for st in scoped:
+            if st.parent_id:
+                children_of.setdefault(st.parent_id, []).append(st)
+            else:
+                tops.append(st)
+
+        rows: list[dict] = []
+        for st in tops:
+            if st.is_category:
+                kids = children_of.get(st.id, [])
+                expanded = st.id not in collapsed
+                totals = _own_amounts(s, st.id, year)
+                for kid in kids:
+                    ka = _own_amounts(s, kid.id, year)
+                    totals = [totals[i] + ka[i] for i in range(12)]
+                cat = {"rid": f"cat-{st.id}", "id": st.id, "kind": "category",
+                       "name": st.name, "typ": f"Kategorie · {len(kids)}",
+                       "expanded": expanded, "row_color": st.color or ""}
+                for m in range(1, 13):
+                    cat[f"m{m}"] = totals[m - 1]
+                    cat[f"color{m}"] = ""
+                    cat[f"mark{m}"] = False
+                    cat[f"detail{m}"] = False
+                rows.append(cat)
+                if expanded:
+                    rows.append(_data_row(s, st, year, "direct", name="↳ Allgemein (direkt)"))
+                    for kid in kids:
+                        rows.append(_data_row(s, kid, year, "child"))
+            else:
+                rows.append(_data_row(s, st, year, "leaf"))
         return rows
 
 
@@ -133,35 +226,45 @@ def _save_row(year: int, data: dict) -> None:
 
 
 def render() -> None:
-    state = {"year": YEARS[0], "scenario": 1}
+    state = {"year": YEARS[0], "scenario": 1, "collapsed": set()}
 
     ui.label("Einnahmen").classes("text-xl font-bold")
-    ui.label("Umsatz je Einnahmequelle und Monat. Zahlungsziel steuert den Geldeingang "
-             "in der Liquidität.").classes("text-sm text-gray-500")
+    ui.label("Umsatz je Einnahmequelle und Monat. Kategorien gruppieren Quellen; die "
+             "Kategoriezeile zeigt die Summe.").classes("text-sm text-gray-500")
 
     with ui.row().classes("items-center gap-3 my-2"):
         ui.select(YEARS, value=state["year"], label="Jahr",
                   on_change=lambda e: _change_year(e.value)).props("outlined dense").classes("w-28")
         scenario_select(state["scenario"], lambda v: _change_scenario(v))
-        ui.button("Einnahmequelle hinzufügen", icon="add", on_click=lambda: _add_dialog())
+        ui.button("Einnahmequelle hinzufügen", icon="add", on_click=lambda: _add_dialog(False))
+        ui.button("Kategorie hinzufügen", icon="create_new_folder",
+                  on_click=lambda: _add_dialog(True)).props("outline")
 
     @ui.refreshable
     def matrix() -> None:
-        rows = _load_rows(state["year"], state["scenario"])
+        rows = _load_tree_rows(state["year"], state["scenario"], state["collapsed"])
         if not rows and state["scenario"] != 1:
             ui.label("Keine eigenen Einnahmen in diesem Szenario — füge welche hinzu oder "
                      "schalte unten Basis-Positionen ein/aus.").classes("text-sm text-gray-500")
+        editable = "params => params.data.kind !== 'category'"
+        # Month cells are NOT single-click editable when they carry a line-item
+        # breakdown (editing would discard it) — those are edited via double-click.
+        editable_month = ("params => params.data.kind !== 'category' && "
+                          "!params.data['detail'+params.colDef.field.substring(1)]")
         col_defs = [
-            {"headerName": "", "rowDrag": True, "width": 40, "pinned": "left",
-             "sortable": False, "resizable": False, "suppressMenu": True, "valueGetter": "''"},
-            {"headerName": "Einnahmequelle", "field": "name", "editable": True,
-             "pinned": "left", "width": 200},
+            {"headerName": "", "width": 38, "pinned": "left", "sortable": False,
+             "resizable": False, "suppressMenu": True, ":valueGetter": "() => ''",
+             # Drag everything except the synthetic "direct" row (it belongs to its category).
+             ":rowDrag": "params => params.data.kind !== 'direct'"},
+            {"headerName": "Einnahmequelle / Kategorie", "field": "name",
+             "pinned": "left", "width": 240, ":editable": editable, ":cellRenderer": _NAME_RENDER},
             {"headerName": "Typ", "field": "typ", "width": 150},
         ]
         for m in range(1, 13):
-            col_defs.append({"headerName": MONTHS_DE[m - 1], "field": f"m{m}", "editable": True,
-                             "width": 96, "type": "numericColumn", ":valueParser": _CELL_PARSER,
-                             ":cellStyle": _CELL_STYLE, ":cellRenderer": _CELL_RENDER})
+            col_defs.append({"headerName": MONTHS_DE[m - 1], "field": f"m{m}",
+                             "width": 96, "type": "numericColumn", ":editable": editable_month,
+                             ":valueParser": _CELL_PARSER, ":cellStyle": _CELL_STYLE,
+                             ":cellRenderer": _CELL_RENDER})
         year_getter = "params => " + "+".join(f"(Number(params.data.m{m})||0)" for m in range(1, 13))
         col_defs.append({"headerName": "Jahr", "field": "jahr", "pinned": "right", "width": 110,
                          "type": "numericColumn", "cellClass": "font-bold", ":valueGetter": year_getter,
@@ -170,17 +273,21 @@ def render() -> None:
             "columnDefs": col_defs, "rowData": rows,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
-            "rowDragManaged": True, "animateRows": True,
-            "rowHeight": 30, "headerHeight": 34,
-            ":getRowId": "params => String(params.data.id)",
+            "rowDragManaged": True, "animateRows": True, "rowHeight": 30, "headerHeight": 34,
+            ":getRowId": "params => params.data.rid",
+            ":getRowStyle": _ROW_STYLE,
         }).classes("w-full").style(f"height: {34 + max(1, len(rows)) * 30 + 20}px")
         grid.on("cellValueChanged", _on_cell_edit)
+        grid.on("cellClicked", _on_cell_click)
         grid.on("cellDoubleClicked", _on_cell_dblclick)
         grid.on("rowDragEnd", _on_drag_end)
-        total = sum(r[f"m{m}"] for r in rows for m in range(1, 13))
+        # Top-level total = leaf rows + category rows (children are already in the category sum).
+        total = sum(r[f"m{m}"] for r in rows for m in range(1, 13)
+                    if r["kind"] in ("category", "leaf"))
         ui.label(f"Eigene Einnahmen {state['year']}: {eur(total)}").classes("text-sm font-semibold mt-1")
-        ui.label("Einfachklick = Wert eingeben · Doppelklick = Detail/Notiz/Farbe · "
-                 "Ziehen am Griff ⠿ = Reihenfolge").classes("text-xs text-gray-500")
+        ui.label("Einfachklick = Wert · Doppelklick = Detail/Notiz/Farbe · Klick auf ▶/▼ = "
+                 "Kategorie auf/zu · Ziehen am Griff ⠿ = Reihenfolge / in Kategorie verschieben"
+                 ).classes("text-xs text-gray-500")
         base_toggle_panel(state["scenario"], "revenue", RevenueStream, matrix.refresh)
 
     def _cell_col(args) -> str:
@@ -190,36 +297,86 @@ def render() -> None:
         a = e.args or {}
         data = a.get("data") or {}
         col = _cell_col(a)
-        if "id" not in data:
+        if "id" not in data or data.get("kind") == "category":
             return
         sid = int(data["id"])
         if col == "name":
             _save_name_cell(sid, data.get("name", ""))
         elif isinstance(col, str) and col.startswith("m") and col[1:].isdigit():
+            # Never overwrite a cell that has a line-item breakdown (data protection).
+            if data.get(f"detail{col[1:]}"):
+                return
             _save_amount_cell(sid, state["year"], int(col[1:]), data.get(col, 0))
+            # A child/direct edit changes its category's total — reload so the
+            # category row's sum updates immediately (no collapse/expand needed).
+            if data.get("kind") in ("child", "direct"):
+                matrix.refresh()
+
+    def _on_cell_click(e) -> None:
+        a = e.args or {}
+        data = a.get("data") or {}
+        if data.get("kind") == "category" and _cell_col(a) == "name":
+            cid = int(data["id"])
+            state["collapsed"] ^= {cid}  # toggle membership
+            matrix.refresh()
 
     def _on_cell_dblclick(e) -> None:
         a = e.args or {}
         data = a.get("data") or {}
         col = _cell_col(a)
-        if "id" in data and isinstance(col, str) and col.startswith("m") and col[1:].isdigit():
+        if (data.get("kind") != "category" and "id" in data
+                and isinstance(col, str) and col.startswith("m") and col[1:].isdigit()):
             _open_cell_modal(int(data["id"]), state["year"], int(col[1:]))
 
     async def _on_drag_end(e) -> None:
+        """Persist a drag: re-derive each row's category (parent) and order from the
+        new on-screen position. A row dropped inside a category becomes its child;
+        dropped above all categories it becomes a top-level source."""
         try:
             client_rows = await e.sender.get_client_data()
         except Exception:
             return
-        order = [int(r["id"]) for r in client_rows if "id" in r]
+        seq = [(r.get("kind"), int(r["id"])) for r in client_rows
+               if "id" in r and r.get("kind") in ("category", "child", "leaf")]
         with get_session() as s:
-            for i, sid in enumerate(order):
-                st = s.get(RevenueStream, sid)
-                if st is not None:
-                    st.sort_order = i
+            scoped = {st.id: st for st in s.exec(select(RevenueStream)).all()
+                      if st.scenario_id == state["scenario"]}
+            top_order: list[int] = []
+            cat_children: dict[int, list[int]] = {}
+            current_cat = None
+            for kind, sid in seq:
+                if sid not in scoped:
+                    continue
+                if kind == "category":
+                    top_order.append(sid)
+                    cat_children.setdefault(sid, [])
+                    current_cat = sid
+                elif current_cat is not None:
+                    cat_children.setdefault(current_cat, []).append(sid)
+                else:
+                    top_order.append(sid)
+            # Re-attach children of collapsed categories that weren't on screen.
+            seen = set(top_order) | {c for kids in cat_children.values() for c in kids}
+            for st in scoped.values():
+                if st.id in seen or st.is_category:
+                    continue
+                if st.parent_id in cat_children:
+                    cat_children[st.parent_id].append(st.id)
+            # Assign a single increasing order across the rebuilt tree.
+            counter = 0
+            for sid in top_order:
+                st = scoped[sid]
+                st.parent_id = None
+                st.sort_order = counter
+                counter += 1
+                for cid in cat_children.get(sid, []):
+                    c = scoped[cid]
+                    c.parent_id = sid
+                    c.sort_order = counter
+                    counter += 1
             s.commit()
         matrix.refresh()
         manage.refresh()
-        ui.notify("Reihenfolge gespeichert", type="positive")
 
     def _open_cell_modal(stream_id: int, year: int, month: int) -> None:
         with get_session() as s:
@@ -371,42 +528,31 @@ def render() -> None:
             list_box.set_visibility(has_list)
             single_in.set_visibility(not has_list)
 
+            # Copy this cell (incl. the whole breakdown) to other months of the same row.
+            copy_sel = ui.select({m: MONTHS_DE[m - 1] for m in range(1, 13) if m != month},
+                                 multiple=True, label="Auch in diese Monate kopieren (optional)"
+                                 ).props("dense outlined use-chips").classes("w-full mt-2")
+
             with ui.row().classes("mt-2"):
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
                 def _save() -> None:
                     use_list = modal["use_list"]
+                    targets = sorted({month, *[int(m) for m in (copy_sel.value or [])]})
                     with get_session() as s:
-                        for e in s.exec(select(RevenueCellEntry).where(
-                                RevenueCellEntry.stream_id == stream_id,
-                                RevenueCellEntry.year == year,
-                                RevenueCellEntry.month == month)).all():
-                            s.delete(e)
-                        pm2 = _cell_pm(s, stream_id, year, month)
-                        if use_list:
-                            kept = [it for it in items
-                                    if (it["qty"] or it["price"] or it["amount"] or it["note"])]
-                            for i, it in enumerate(kept):
-                                s.add(RevenueCellEntry(
-                                    stream_id=stream_id, year=year, month=month, sort_order=i,
-                                    qty=float(it["qty"] or 0), price=float(it["price"] or 0),
-                                    amount=float(it["amount"] or 0), note=it["note"] or "",
-                                    pay_routine=it["routine"], payment_days=int(it["pdays"] or 0),
-                                    deposit_is_pct=bool(it["dep_pct"]),
-                                    deposit_value=float(it["dep_val"] or 0),
-                                    rate_count=int(it["rates"] or 0), rate_months=int(it["months"] or 0)))
-                        else:
-                            pm2.amount = float(single_in.value or 0)
-                            pm2.units = 0.0
-                        pm2.note = note_in.value or ""
-                        pm2.color = modal["color"] or ""
-                        s.commit()
-                        if use_list:
-                            _recompute_cell(s, s.get(RevenueStream, stream_id), year, month)
+                        stream2 = s.get(RevenueStream, stream_id)
+                        for tm in targets:
+                            _apply_cell_content(
+                                s, stream2, year, tm, use_list=use_list, items=items,
+                                note=note_in.value, color=modal["color"],
+                                single_value=single_in.value)
                     recompute_all()
                     dlg.close()
                     matrix.refresh()
-                    ui.notify("Zelle gespeichert", type="positive")
+                    extra = len(targets) - 1
+                    msg = ("Zelle gespeichert" if not extra
+                           else f"Zelle gespeichert und in {extra} weitere Monate kopiert")
+                    ui.notify(msg, type="positive")
 
                 ui.button("Speichern", icon="save", on_click=_save)
         dlg.open()
@@ -417,48 +563,67 @@ def render() -> None:
             streams = [st for st in s.exec(select(RevenueStream).order_by(
                 RevenueStream.sort_order, RevenueStream.id)).all()
                 if st.scenario_id == state["scenario"]]
-            data = [(st.id, st.name, st.rtype, _stream_days(st), st.is_vatable) for st in streams]
-        with ui.expansion("Einnahmequellen bearbeiten (Typ, Zahlungsziel, löschen)",
-                          icon="tune").classes("w-full"):
+            cats = {st.id: st.name for st in streams if st.is_category}
+            data = [(st.id, st.name, st.rtype, _stream_days(st), st.is_vatable,
+                     st.is_category, st.parent_id, st.color or "") for st in streams]
+        # Parent options: "no category" + every category (a category can't be its own parent).
+        with ui.expansion("Einnahmequellen & Kategorien bearbeiten (Typ, Zahlungsziel, "
+                          "Kategorie, löschen)", icon="tune").classes("w-full"):
             if not data:
                 ui.label("Keine eigenen Einnahmequellen in diesem Szenario.").classes(
                     "text-sm text-gray-500")
-            for sid, name, rtype, days, vat in data:
+            for sid, name, rtype, days, vat, is_cat, parent_id, color in data:
                 with ui.row().classes("items-center gap-2"):
                     with ui.column().classes("gap-0"):
                         ui.button(icon="keyboard_arrow_up", on_click=lambda sid=sid: _move(sid, -1)
                                   ).props("flat dense").classes("w-6 h-4").tooltip("nach oben")
                         ui.button(icon="keyboard_arrow_down", on_click=lambda sid=sid: _move(sid, 1)
                                   ).props("flat dense").classes("w-6 h-4").tooltip("nach unten")
+                    icon = "create_new_folder" if is_cat else "trending_up"
+                    ui.icon(icon).classes("text-gray-400")
                     ui.input("Bezeichnung", value=name,
                              on_change=lambda e, sid=sid: _save_field(sid, name=e.value)
-                             ).props("dense outlined").classes("w-52")
-                    ui.select({t: REVENUE_TYPE_DE[t] for t in RevenueType}, value=rtype, label="Typ",
+                             ).props("dense outlined").classes("w-48")
+                    type_label = "Typ (Direkt-Einnahme)" if is_cat else "Typ"
+                    ui.select({t: REVENUE_TYPE_DE[t] for t in RevenueType}, value=rtype,
+                              label=type_label,
                               on_change=lambda e, sid=sid: _save_field(sid, rtype=RevenueType(e.value))
                               ).props("dense outlined").classes("w-48")
-                    ui.number("Zahlungsziel (Tage)", value=days, min=0, max=365, step=1,
+                    if is_cat:
+                        ui.select(CELL_COLORS, value=color, label="Farbe",
+                                  on_change=lambda e, sid=sid: _save_field(sid, color=e.value)
+                                  ).props("dense outlined").classes("w-32")
+                    else:
+                        parent_opts = {0: "— keine Kategorie —", **{cid: nm for cid, nm in cats.items()}}
+                        ui.select(parent_opts, value=parent_id or 0, label="Kategorie",
+                                  on_change=lambda e, sid=sid: _save_field(
+                                      sid, parent_id=(int(e.value) or None))
+                                  ).props("dense outlined").classes("w-44")
+                    ui.number("Ziel (Tage)", value=days, min=0, max=365, step=1,
                               on_change=lambda e, sid=sid: _save_field(sid, payment_days=int(e.value or 0))
-                              ).props("dense outlined").classes("w-36")
+                              ).props("dense outlined").classes("w-28")
                     ui.checkbox("USt", value=vat,
                                 on_change=lambda e, sid=sid: _save_field(sid, is_vatable=bool(e.value)))
-                    ui.button(icon="delete", on_click=lambda sid=sid, name=name: _delete_stream(sid, name)
-                              ).props("flat round dense color=negative").tooltip("Einnahmequelle löschen")
+                    ui.button(icon="delete", on_click=lambda sid=sid, name=name, is_cat=is_cat:
+                              _delete_stream(sid, name, is_cat)
+                              ).props("flat round dense color=negative").tooltip("löschen")
 
     def _move(sid: int, delta: int) -> None:
+        """Move within siblings only (same category / same top level) by swapping
+        sort_order with the adjacent sibling — never jumps across categories."""
         with get_session() as s:
-            ids = [st.id for st in s.exec(select(RevenueStream).order_by(
-                RevenueStream.sort_order, RevenueStream.id)).all()
-                if st.scenario_id == state["scenario"]]
-            if sid not in ids:
+            target = s.get(RevenueStream, sid)
+            if target is None:
                 return
+            sibs = [st for st in s.exec(select(RevenueStream).order_by(
+                RevenueStream.sort_order, RevenueStream.id)).all()
+                if st.scenario_id == state["scenario"] and st.parent_id == target.parent_id]
+            ids = [st.id for st in sibs]
             i = ids.index(sid)
             j = i + delta
             if j < 0 or j >= len(ids):
                 return
-            ids[i], ids[j] = ids[j], ids[i]
-            for order, _id in enumerate(ids):
-                st = s.get(RevenueStream, _id)
-                st.sort_order = order
+            sibs[i].sort_order, sibs[j].sort_order = sibs[j].sort_order, sibs[i].sort_order
             s.commit()
         matrix.refresh()
         manage.refresh()
@@ -474,16 +639,23 @@ def render() -> None:
             s.commit()
         recompute_all()
 
-    def _delete_stream(sid: int, name: str) -> None:
+    def _delete_stream(sid: int, name: str, is_cat: bool = False) -> None:
         with ui.dialog() as dlg, ui.card():
-            ui.label(f'Einnahmequelle „{name}" löschen?').classes("text-lg font-bold")
-            ui.label("Alle Monatswerte dieser Quelle werden entfernt.").classes(
+            ui.label(f'„{name}" löschen?').classes("text-lg font-bold")
+            ui.label("Kategorie löschen: die enthaltenen Quellen werden zu obersten Quellen "
+                     "(nicht gelöscht)." if is_cat
+                     else "Alle Monatswerte dieser Quelle werden entfernt.").classes(
                 "text-sm text-gray-500")
             with ui.row():
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
                 def _do() -> None:
                     with get_session() as s:
+                        if is_cat:
+                            for kid in s.exec(select(RevenueStream).where(
+                                    RevenueStream.parent_id == sid)).all():
+                                kid.parent_id = None
+                                s.add(kid)
                         for p in s.exec(select(RevenuePlanMonth).where(
                                 RevenuePlanMonth.stream_id == sid)).all():
                             s.delete(p)
@@ -516,14 +688,25 @@ def render() -> None:
         matrix.refresh()
         manage.refresh()
 
-    def _add_dialog() -> None:
+    def _add_dialog(as_category: bool) -> None:
+        with get_session() as s:
+            cats = {st.id: st.name for st in s.exec(select(RevenueStream)).all()
+                    if st.scenario_id == state["scenario"] and st.is_category}
         with ui.dialog() as dialog, ui.card():
-            ui.label("Neue Einnahmequelle").classes("text-lg font-bold")
+            ui.label("Neue Kategorie" if as_category else "Neue Einnahmequelle").classes(
+                "text-lg font-bold")
             name = ui.input("Bezeichnung").classes("w-72")
-            rtype = ui.select({t: REVENUE_TYPE_DE[t] for t in RevenueType},
-                              value=RevenueType.RECURRING, label="Typ").classes("w-72")
-            days = ui.number("Zahlungsziel (Tage)", value=30, min=0, max=365, step=1).classes("w-72")
-            vat = ui.checkbox("umsatzsteuerpflichtig", value=True)
+            if as_category:
+                ui.label("Eine Kategorie gruppiert Einnahmequellen. Eigene Werte werden in der "
+                         "Zeile Allgemein (direkt) erfasst.").classes("text-xs text-gray-500")
+                rtype = days = vat = parent = None
+            else:
+                rtype = ui.select({t: REVENUE_TYPE_DE[t] for t in RevenueType},
+                                  value=RevenueType.RECURRING, label="Typ").classes("w-72")
+                parent = ui.select({0: "— keine Kategorie —", **cats}, value=0,
+                                   label="Kategorie (optional)").classes("w-72")
+                days = ui.number("Zahlungsziel (Tage)", value=30, min=0, max=365, step=1).classes("w-72")
+                vat = ui.checkbox("umsatzsteuerpflichtig", value=True)
             with ui.row():
                 ui.button("Abbrechen", on_click=dialog.close).props("flat")
 
@@ -532,10 +715,17 @@ def render() -> None:
                         ui.notify("Bezeichnung fehlt", type="warning")
                         return
                     with get_session() as s:
-                        order = max([x.sort_order for x in s.exec(select(RevenueStream)).all()], default=0) + 1
-                        s.add(RevenueStream(name=name.value, rtype=RevenueType(rtype.value),
-                                            payment_days=int(days.value or 0), is_vatable=bool(vat.value),
-                                            scenario_id=state["scenario"], sort_order=order))
+                        order = max([x.sort_order for x in s.exec(select(RevenueStream)).all()],
+                                    default=0) + 1
+                        if as_category:
+                            s.add(RevenueStream(name=name.value, is_category=True,
+                                                scenario_id=state["scenario"], sort_order=order))
+                        else:
+                            s.add(RevenueStream(
+                                name=name.value, rtype=RevenueType(rtype.value),
+                                payment_days=int(days.value or 0), is_vatable=bool(vat.value),
+                                parent_id=(int(parent.value) or None),
+                                scenario_id=state["scenario"], sort_order=order))
                         s.commit()
                     dialog.close()
                     matrix.refresh()

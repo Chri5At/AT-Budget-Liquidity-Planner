@@ -36,6 +36,11 @@ def _migrate() -> bool:
                                "scenario_id INTEGER DEFAULT 1")
         # Flexible payment term in days (overrides the PaymentTerm enum when set).
         _add_column_if_missing(conn, "revenuestream", "payment_days", "payment_days INTEGER")
+        # Revenue category grouping (UI only).
+        _add_column_if_missing(conn, "revenuestream", "is_category",
+                               "is_category BOOLEAN DEFAULT 0")
+        _add_column_if_missing(conn, "revenuestream", "parent_id", "parent_id INTEGER")
+        _add_column_if_missing(conn, "revenuestream", "color", "color VARCHAR DEFAULT ''")
         # Per-cell note + colour for the Einnahmen grid.
         _add_column_if_missing(conn, "revenueplanmonth", "note", "note VARCHAR DEFAULT ''")
         _add_column_if_missing(conn, "revenueplanmonth", "color", "color VARCHAR DEFAULT ''")

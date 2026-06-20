@@ -101,6 +101,11 @@ class RevenueStream(SQLModel, table=True):
     unit_price: Optional[float] = None   # for PRODUCT type
     is_vatable: bool = True
     sort_order: int = 0
+    # Grouping (UI only): a category groups child streams; its own plan values are
+    # the category's "direct" income. Engines treat every stream the same.
+    is_category: bool = False
+    parent_id: Optional[int] = Field(default=None, foreign_key="revenuestream.id", index=True)
+    color: str = ""   # category row colour (CSS), for visual separation in the grid
 
 
 class RevenuePlanMonth(SQLModel, table=True):
