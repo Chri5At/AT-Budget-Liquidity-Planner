@@ -114,48 +114,85 @@ class LiquidityPivot:
     bank_no_eu: list[float]
 
 
-def liquidity_pivot(session: Session, entries=None) -> LiquidityPivot:
-    """Horizontal cash-flow view: buckets as columns, grouped line items as rows
-    (mirrors the Excel liquidity plan). Each section groups entries by memo."""
+_MONTHS_DE = ["Jän", "Feb", "Mär", "Apr", "Mai", "Jun",
+              "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+
+
+def _group_periods(fine: list[date], granularity: str):
+    """Group fine 15./month-end buckets into display periods.
+    Returns list of (label, [bucket dates in this period], period_end_bucket)."""
+    if granularity == "monthly":
+        groups: dict = {}
+        for b in fine:
+            groups.setdefault((b.year, b.month), []).append(b)
+        out = []
+        for (y, m), bks in sorted(groups.items()):
+            out.append((f"{_MONTHS_DE[m - 1]} {y}", bks, bks[-1]))
+        return out
+    if granularity == "quarterly":
+        groups = {}
+        for b in fine:
+            groups.setdefault((b.year, (b.month - 1) // 3 + 1), []).append(b)
+        out = []
+        for (y, q), bks in sorted(groups.items()):
+            out.append((f"Q{q} {y}", bks, bks[-1]))
+        return out
+    # biweekly (default): each fine bucket is its own period
+    return [(f"{b.day:02d}.{b.month:02d}.{b.year}", [b], b) for b in fine]
+
+
+def liquidity_pivot(session: Session, entries=None, *, granularity: str = "biweekly",
+                    range_start: date | None = None, range_end: date | None = None) -> LiquidityPivot:
+    """Horizontal cash-flow view: time periods as columns, grouped line items as rows.
+
+    `granularity` is 'biweekly' | 'monthly' | 'quarterly'. `range_start`/`range_end`
+    limit which periods are shown; the running balance is still cumulative from the
+    opening date (so the Bank Status of a shown period includes earlier flows)."""
     from collections import defaultdict
-    settings = get_settings(session)
     if entries is None:
         entries = session.exec(select(CashflowEntry)).all()
 
-    buckets = [b for b in bucket_sequence(settings) if b >= settings.opening_balance_date]
-    bidx = {b: i for i, b in enumerate(buckets)}
+    rows = liquidity_view(session, entries)        # fine buckets ≥ opening date, with balances
+    by_b = {r.bucket: r for r in rows}
+    fine = [r.bucket for r in rows]
+    disp = [b for b in fine
+            if (range_start is None or b >= range_start) and (range_end is None or b <= range_end)]
+    periods = _group_periods(disp, granularity)
+    n = len(periods)
+
+    bucket_to_p: dict[date, int] = {}
+    for pi, (_, bks, _) in enumerate(periods):
+        for b in bks:
+            bucket_to_p[b] = pi
 
     sec: dict[str, dict[str, list[float]]] = {
-        "Einzahlungen": defaultdict(lambda: [0.0] * len(buckets)),
-        "Auszahlungen": defaultdict(lambda: [0.0] * len(buckets)),
+        "Einzahlungen": defaultdict(lambda: [0.0] * n),
+        "Auszahlungen": defaultdict(lambda: [0.0] * n),
     }
     for e in entries:
-        i = bidx.get(e.bucket)
-        if i is None:
+        pi = bucket_to_p.get(e.bucket)
+        if pi is None:
             continue
         section = "Einzahlungen" if e.kind in INFLOW_KINDS else "Auszahlungen"
-        sec[section][e.memo or "(ohne Bezeichnung)"][i] += e.amount
+        sec[section][e.memo or "(ohne Bezeichnung)"][pi] += e.amount
 
     sections = []
     for name in ("Einzahlungen", "Auszahlungen"):
         items = sorted(sec[name].items(), key=lambda kv: -sum(abs(x) for x in kv[1]))
-        totals = [sum(vals[i] for _, vals in items) for i in range(len(buckets))]
+        totals = [sum(vals[i] for _, vals in items) for i in range(n)]
         sections.append(PivotSection(name, totals,
                                      [(lbl, [round(x) for x in vals]) for lbl, vals in items]))
 
-    rows = liquidity_view(session, entries)
-    by_b = {r.bucket: r for r in rows}
-    saldo, bank, bank_no_eu = [], [], []
-    for b in buckets:
-        r = by_b.get(b)
-        saldo.append(round(r.net) if r else 0)
-        bank.append(round(r.balance) if r else 0)
-        bank_no_eu.append(round(r.balance_no_eu) if r else 0)
+    saldo, bank, bank_no_eu, labels = [], [], [], []
+    for lbl, bks, end in periods:
+        labels.append(lbl)
+        saldo.append(round(sum(by_b[b].net for b in bks)))
+        bank.append(round(by_b[end].balance))
+        bank_no_eu.append(round(by_b[end].balance_no_eu))
 
-    labels = [f"{b.day:02d}.{b.month:02d}.{b.year}" for b in buckets]
-    return LiquidityPivot(buckets, labels, sections, saldo, bank, bank_no_eu)
+    return LiquidityPivot([end for _, _, end in periods], labels, sections, saldo, bank, bank_no_eu)
 
 
-def liquidity_pivot_for_scenario(session: Session, scenario_id: int) -> LiquidityPivot:
+def liquidity_pivot_for_scenario(session: Session, scenario_id: int, **kw) -> LiquidityPivot:
     from .cashflow import build_entries
-    return liquidity_pivot(session, build_entries(session, scenario_id))
+    return liquidity_pivot(session, build_entries(session, scenario_id), **kw)

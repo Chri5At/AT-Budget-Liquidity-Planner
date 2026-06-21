@@ -5,21 +5,45 @@ Shows Bank Status with and without EU funding, plus a balance chart.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from nicegui import ui
 from sqlmodel import select
 
 from ...db import get_session
+from ...engine.calendar_at import last_day_of_month
 from ...engine.liquidity import (
     liquidity_pivot,
+    liquidity_pivot_for_scenario,
     liquidity_view,
-    liquidity_view_for_scenario,
 )
 from ...engine.scenarios import list_scenarios
 from ...models import Investment
 from ...services.recompute import recompute_all
 from ..formatting import eur, page_title
+
+_PRESETS = {"all": "Gesamter Zeitraum", "this_year": "Dieses Jahr", "next_year": "Nächstes Jahr",
+            "this_q": "Dieses Quartal", "next_q": "Nächstes Quartal", "custom": "Benutzerdefiniert"}
+_GRANS = {"biweekly": "14-tägig (15./Monatsende)", "monthly": "Monatlich", "quarterly": "Quartal"}
+
+
+def _quarter_range(year: int, q: int) -> tuple[date, date]:
+    sm = (q - 1) * 3 + 1
+    return date(year, sm, 1), last_day_of_month(year, sm + 2)
+
+
+def _preset_range(preset: str) -> tuple[date | None, date | None]:
+    today = datetime.now().date()
+    q = (today.month - 1) // 3 + 1
+    if preset == "this_year":
+        return date(today.year, 1, 1), date(today.year, 12, 31)
+    if preset == "next_year":
+        return date(today.year + 1, 1, 1), date(today.year + 1, 12, 31)
+    if preset == "this_q":
+        return _quarter_range(today.year, q)
+    if preset == "next_q":
+        return _quarter_range(today.year + 1, 1) if q == 4 else _quarter_range(today.year, q + 1)
+    return None, None  # "all" / "custom" handled by the caller
 
 # Pivot grid JS: caret for sections, bold for subtotal/balance rows, red for negatives.
 _PIV_NAME = (
@@ -41,81 +65,104 @@ def render() -> None:
                "Zeilen — gruppiert in Ein-/Auszahlungen (auf-/zuklappbar). Gehälter: Netto am "
                "Monatsende, Abgaben am 15. des Folgemonats (Banktag-Anpassung).")
 
-    state = {"collapsed": set()}
+    state = {"collapsed": set(), "gran": "biweekly", "preset": "all",
+             "start": "", "end": ""}
+    controls_area = ui.column().classes("w-full")
     container = ui.column().classes("w-full")
+
+    def _range() -> tuple[date | None, date | None]:
+        if state["preset"] == "custom":
+            try:
+                rs = date.fromisoformat(state["start"]) if state["start"] else None
+            except ValueError:
+                rs = None
+            try:
+                re = date.fromisoformat(state["end"]) if state["end"] else None
+            except ValueError:
+                re = None
+            return rs, re
+        return _preset_range(state["preset"])
+
+    @ui.refreshable
+    def controls() -> None:
+        with ui.row().classes("items-center gap-3 my-1 flex-wrap"):
+            ui.select(_PRESETS, value=state["preset"], label="Zeitraum",
+                      on_change=lambda e: (state.update(preset=e.value), controls.refresh(), build())
+                      ).props("dense outlined").classes("w-44")
+            if state["preset"] == "custom":
+                ui.input("Von (YYYY-MM-DD)", value=state["start"],
+                         on_change=lambda e: (state.update(start=e.value), build())
+                         ).props("dense outlined").classes("w-44")
+                ui.input("Bis (YYYY-MM-DD)", value=state["end"],
+                         on_change=lambda e: (state.update(end=e.value), build())
+                         ).props("dense outlined").classes("w-44")
+            ui.toggle(_GRANS, value=state["gran"],
+                      on_change=lambda e: (state.update(gran=e.value), build())).props("dense")
 
     def build() -> None:
         container.clear()
         recompute_all()
+        gran = state["gran"]
+        rs, re = _range()
         with get_session() as s:
             scs = list_scenarios(s)
-            rows = liquidity_view(s)
             multi = len(scs) > 1
-            scenario_rows = ([(sc.name, rows if sc.base_id is None
-                               else liquidity_view_for_scenario(s, sc.id)) for sc in scs]
-                             if multi else [])
-            pivot = liquidity_pivot(s)
+            piv_scen = ([(sc.name,
+                          liquidity_pivot(s, granularity=gran, range_start=rs, range_end=re)
+                          if sc.base_id is None
+                          else liquidity_pivot_for_scenario(s, sc.id, granularity=gran,
+                                                            range_start=rs, range_end=re))
+                         for sc in scs] if multi else [])
+            pivot = liquidity_pivot(s, granularity=gran, range_start=rs, range_end=re)
         with container:
-            if not rows:
-                ui.label("Keine Daten — bitte zuerst Mitarbeiter/Einnahmen/Ausgaben erfassen.")
+            if not pivot.labels:
+                ui.label("Keine Daten im gewählten Zeitraum — Zeitraum/Granularität anpassen "
+                         "oder Werte erfassen.").classes("text-sm text-gray-500")
                 return
 
-            labels = [r.label for r in rows]
+            labels = pivot.labels
             if multi:
-                series = [{"name": nm, "type": "line", "smooth": True,
-                           "data": [round(x.balance) for x in r]} for nm, r in scenario_rows]
-                ui.echart({
-                    "tooltip": {"trigger": "axis"},
-                    "legend": {"data": [nm for nm, _ in scenario_rows]},
-                    "xAxis": {"type": "category", "data": labels,
-                              "axisLabel": {"rotate": 60, "fontSize": 9}},
-                    "yAxis": {"type": "value"},
-                    "series": series,
-                }).classes("w-full").style("height: 320px")
-                with ui.row().classes("gap-6 my-2 flex-wrap"):
-                    for nm, r in scenario_rows:
-                        low = min(x.balance for x in r)
-                        ui.label(f"{nm}: Tief {eur(low)} · End {eur(r[-1].balance)}").classes(
-                            "text-sm font-semibold " + ("text-red-600" if low < 0 else "text-green-700"))
+                series = [{"name": nm, "type": "line", "smooth": True, "data": p.bank}
+                          for nm, p in piv_scen]
+                legend = [nm for nm, _ in piv_scen]
             else:
-                bal = [round(r.balance) for r in rows]
-                bal_no_eu = [round(r.balance_no_eu) for r in rows]
-                ui.echart({
-                    "tooltip": {"trigger": "axis"},
-                    "legend": {"data": ["Bank Status", "ohne EU-Förderung"]},
-                    "xAxis": {"type": "category", "data": labels, "axisLabel": {"rotate": 60, "fontSize": 9}},
-                    "yAxis": {"type": "value"},
-                    "series": [
-                        {"name": "Bank Status", "type": "line", "smooth": True, "data": bal},
-                        {"name": "ohne EU-Förderung", "type": "line", "smooth": True,
-                         "data": bal_no_eu, "lineStyle": {"type": "dashed"}},
-                    ],
-                }).classes("w-full").style("height: 320px")
+                series = [
+                    {"name": "Bank Status", "type": "line", "smooth": True, "data": pivot.bank},
+                    {"name": "ohne EU-Förderung", "type": "line", "smooth": True,
+                     "data": pivot.bank_no_eu, "lineStyle": {"type": "dashed"}},
+                ]
+                legend = ["Bank Status", "ohne EU-Förderung"]
+            ui.echart({
+                "tooltip": {"trigger": "axis"},
+                "legend": {"data": legend},
+                "xAxis": {"type": "category", "data": labels, "axisLabel": {"rotate": 60, "fontSize": 9}},
+                "yAxis": {"type": "value"},
+                "series": series,
+            }).classes("w-full").style("height: 320px")
             ui.label("„ohne EU-Förderung“ = derselbe Verlauf ohne die EU-Förder-Einzahlung "
                      "(kein Szenario). Mehrere Szenarien werden im Diagramm überlagert."
                      ).classes("text-xs text-gray-500")
 
-            low = min(r.balance for r in rows)
-            end = rows[-1].balance
-            sub_total = sum(r.subcontractor for r in rows)
-            with ui.row().classes("gap-6 my-2"):
+            low = min(pivot.bank)
+            with ui.row().classes("gap-6 my-2 flex-wrap"):
                 ui.label(f"Tiefststand: {eur(low)}").classes(
                     "text-sm font-semibold " + ("text-red-600" if low < 0 else "text-green-700"))
-                ui.label(f"Endsaldo: {eur(end)}").classes("text-sm font-semibold")
-                if sub_total:
-                    ui.label(f"Subunternehmer-Auszahlungen: {eur(sub_total)}").classes(
-                        "text-sm font-semibold").style("color:#b45309")
+                ui.label(f"Endsaldo: {eur(pivot.bank[-1])}").classes("text-sm font-semibold")
                 if multi:
+                    for nm, p in piv_scen:
+                        lo = min(p.bank)
+                        ui.label(f"{nm}: Tief {eur(lo)} · End {eur(p.bank[-1])}").classes(
+                            "text-xs font-semibold " + ("text-red-600" if lo < 0 else "text-green-700"))
                     ui.label("Detailtabelle: Basis-Szenario").classes("text-xs text-gray-500")
 
             _render_pivot(pivot)
 
     def _render_pivot(pivot) -> None:
-        cols = [{"headerName": "Position", "field": "pos", "pinned": "left", "width": 240,
+        cols = [{"headerName": "Position", "field": "pos", "pinned": "left", "width": 250,
                  ":cellRenderer": _PIV_NAME}]
         for i, lab in enumerate(pivot.labels):
-            cols.append({"headerName": lab, "field": f"b{i}", "type": "numericColumn", "width": 88,
-                         ":cellStyle": _PIV_STYLE,
+            cols.append({"headerName": lab, "field": f"b{i}", "type": "numericColumn", "width": 108,
+                         "headerClass": "ag-center-header", ":cellStyle": _PIV_STYLE,
                          ":valueFormatter": "p=>p.value?Math.round(p.value).toLocaleString('de-DE'):''"})
         cols.append({"headerName": "Summe", "field": "sum", "pinned": "right", "width": 120,
                      "type": "numericColumn", "cellClass": "font-bold",
@@ -235,9 +282,11 @@ def render() -> None:
         ui.notify("Investment gelöscht", type="positive")
         _refresh_all()
 
-    investments_panel()
-    ui.button("Aktualisieren", icon="refresh", on_click=build).props("outline").classes("my-2")
+    with controls_area:
+        controls()
     build()
+    ui.separator().classes("my-3")
+    investments_panel()
 
     def _on_show() -> None:
         # Rebuild the cashflow ledger + view so opening the tab shows current data.
