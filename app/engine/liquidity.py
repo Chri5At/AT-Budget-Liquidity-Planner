@@ -29,6 +29,7 @@ class BucketRow:
     net: float = 0.0
     balance: float = 0.0
     balance_no_eu: float = 0.0
+    subcontractor: float = 0.0   # subcontractor outflow in this bucket (negative)
     by_kind: dict = field(default_factory=dict)
 
 
@@ -59,6 +60,8 @@ def liquidity_view(session: Session, entries=None) -> list[BucketRow]:
         else:
             slot["__out__"] += e.amount
         slot[e.kind.value] += e.amount
+        if e.source_kind == "subcontractor":
+            slot["__sub__"] += e.amount
         if e.is_eu_funding:
             eu_by_bucket[e.bucket] += e.amount
 
@@ -81,6 +84,7 @@ def liquidity_view(session: Session, entries=None) -> list[BucketRow]:
             bucket=b, label=label,
             inflow=slot.get("__in__", 0.0), outflow=slot.get("__out__", 0.0),
             net=net, balance=balance, balance_no_eu=balance_no_eu,
+            subcontractor=slot.get("__sub__", 0.0),
             by_kind={k: v for k, v in slot.items() if not k.startswith("__")},
         ))
     return rows

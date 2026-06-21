@@ -55,6 +55,16 @@ def _stream_days(st: RevenueStream) -> int:
     return st.payment_days if st.payment_days is not None else TERM_DAYS[st.payment_term]
 
 
+# Types whose breakdown lines are entered as Menge × Preis (qty × price) rather
+# than a plain Betrag. Recurring income often has a price per unit (e.g. per sync)
+# with a different quantity each month; projects are turbines × price + fees.
+_QTY_PRICE_TYPES = (RevenueType.PRODUCT, RevenueType.RECURRING, RevenueType.PROJECT)
+
+
+def _uses_qty_price(rtype: RevenueType) -> bool:
+    return rtype in _QTY_PRICE_TYPES
+
+
 def _cell_pm(s, stream_id: int, year: int, month: int) -> RevenuePlanMonth:
     pm = s.exec(select(RevenuePlanMonth).where(
         RevenuePlanMonth.stream_id == stream_id, RevenuePlanMonth.year == year,
@@ -70,7 +80,11 @@ def _recompute_cell(s, stream: RevenueStream, year: int, month: int) -> None:
     entries = s.exec(select(RevenueCellEntry).where(
         RevenueCellEntry.stream_id == stream.id, RevenueCellEntry.year == year,
         RevenueCellEntry.month == month)).all()
-    if stream.rtype == RevenueType.PRODUCT:
+    if stream.rtype == RevenueType.PROJECT:
+        # Project income = turbines × price + fixed fees (subcontractor is a cost).
+        total = sum(e.qty * e.price + e.fixed_fee for e in entries)
+        units = sum(e.qty for e in entries)
+    elif _uses_qty_price(stream.rtype):
         total = sum(e.qty * e.price for e in entries)
         units = sum(e.qty for e in entries)
     else:
@@ -95,7 +109,9 @@ def _apply_cell_content(s, stream: RevenueStream, year: int, month: int, *,
         s.delete(e)
     pm = _cell_pm(s, stream.id, year, month)
     if use_list:
-        kept = [it for it in items if (it["qty"] or it["price"] or it["amount"] or it["note"])]
+        kept = [it for it in items
+                if (it["qty"] or it["price"] or it["amount"] or it["note"]
+                    or it.get("fixed_fee") or it.get("sub_rate") or it.get("sub_fixed"))]
         for i, it in enumerate(kept):
             s.add(RevenueCellEntry(
                 stream_id=stream.id, year=year, month=month, sort_order=i,
@@ -103,7 +119,9 @@ def _apply_cell_content(s, stream: RevenueStream, year: int, month: int, *,
                 amount=float(it["amount"] or 0), note=it["note"] or "",
                 pay_routine=it["routine"], payment_days=int(it["pdays"] or 0),
                 deposit_is_pct=bool(it["dep_pct"]), deposit_value=float(it["dep_val"] or 0),
-                rate_count=int(it["rates"] or 0), rate_months=int(it["months"] or 0)))
+                rate_count=int(it["rates"] or 0), rate_months=int(it["months"] or 0),
+                fixed_fee=float(it.get("fixed_fee") or 0), sub_rate=float(it.get("sub_rate") or 0),
+                sub_fixed=float(it.get("sub_fixed") or 0), sub_days=int(it.get("sdays") or 0)))
     else:
         pm.amount = float(single_value or 0)
         pm.units = 0.0
@@ -384,6 +402,8 @@ def render() -> None:
             if stream is None:
                 return
             is_product = stream.rtype == RevenueType.PRODUCT
+            is_project = stream.rtype == RevenueType.PROJECT
+            qty_mode = _uses_qty_price(stream.rtype)   # Menge × Preis lines
             sname = stream.name
             default_days = _stream_days(stream)
             pm = s.exec(select(RevenuePlanMonth).where(
@@ -396,7 +416,9 @@ def render() -> None:
                       "routine": e.pay_routine,
                       "pdays": e.payment_days if e.payment_days is not None else default_days,
                       "dep_pct": e.deposit_is_pct, "dep_val": e.deposit_value,
-                      "rates": e.rate_count, "months": e.rate_months}
+                      "rates": e.rate_count, "months": e.rate_months,
+                      "fixed_fee": e.fixed_fee, "sub_rate": e.sub_rate, "sub_fixed": e.sub_fixed,
+                      "sdays": e.sub_days if e.sub_days is not None else default_days}
                      for e in s.exec(select(RevenueCellEntry).where(
                          RevenueCellEntry.stream_id == stream_id, RevenueCellEntry.year == year,
                          RevenueCellEntry.month == month).order_by(
@@ -405,16 +427,27 @@ def render() -> None:
         def _new_item() -> dict:
             return {"qty": 0.0, "price": 0.0, "amount": 0.0, "note": "",
                     "routine": RevenuePayRoutine.ON_DELIVERY, "pdays": default_days,
-                    "dep_pct": True, "dep_val": 0.0, "rates": 3, "months": 6}
+                    "dep_pct": True, "dep_val": 0.0, "rates": 3, "months": 6,
+                    "fixed_fee": 0.0, "sub_rate": 0.0, "sub_fixed": 0.0, "sdays": default_days}
 
         if not items:
             items = [_new_item()]
         modal = {"color": color0}
 
+        def _line_rev(it: dict) -> float:
+            base = (it["qty"] or 0) * (it["price"] or 0)
+            return base + (it["fixed_fee"] or 0) if is_project else base
+
+        def _line_sub(it: dict) -> float:
+            return (it["qty"] or 0) * (it["sub_rate"] or 0) + (it["sub_fixed"] or 0)
+
         def _total() -> float:
-            if is_product:
-                return sum((it["qty"] or 0) * (it["price"] or 0) for it in items)
+            if qty_mode:
+                return sum(_line_rev(it) for it in items)
             return sum((it["amount"] or 0) for it in items)
+
+        def _sub_total() -> float:
+            return sum(_line_sub(it) for it in items)
 
         has_list = any((it["qty"] or it["price"] or it["amount"] or it["note"]) for it in items)
         modal["use_list"] = has_list
@@ -440,15 +473,20 @@ def render() -> None:
             total_label = ui.label().classes("text-sm font-semibold")
 
             def _refresh_total() -> None:
-                total_label.text = f"Summe Aufstellung: {eur(_total())}"
+                if is_project:
+                    rev, sub = _total(), _sub_total()
+                    total_label.text = (f"Umsatz {eur(rev)}  ·  Subunternehmer −{eur(sub)}  ·  "
+                                        f"Netto-Marge {eur(rev - sub)}")
+                else:
+                    total_label.text = f"Summe Aufstellung: {eur(_total())}"
 
             @ui.refreshable
             def lines() -> None:
                 for idx, it in enumerate(items):
                     with ui.card().classes("w-full p-2 gap-1"):
                         with ui.row().classes("items-center gap-2"):
-                            if is_product:
-                                ui.number("Menge", value=it["qty"], step=1,
+                            if qty_mode:
+                                ui.number("Menge" if is_project else "Menge", value=it["qty"], step=1,
                                           on_change=lambda e, it=it: (it.__setitem__("qty", e.value or 0),
                                                                       _refresh_total())
                                           ).props("dense outlined").classes("w-24")
@@ -456,11 +494,18 @@ def render() -> None:
                                           on_change=lambda e, it=it: (it.__setitem__("price", e.value or 0),
                                                                       _refresh_total())
                                           ).props("dense outlined").classes("w-28")
-                                ui.label(f"= {eur((it['qty'] or 0) * (it['price'] or 0))}").classes(
-                                    "text-xs text-gray-500 w-28")
+                                if is_project:
+                                    ui.number("Fixkosten (€)", value=it["fixed_fee"], step=100,
+                                              on_change=lambda e, it=it: (
+                                                  it.__setitem__("fixed_fee", e.value or 0), _refresh_total())
+                                              ).props("dense outlined").classes("w-32").tooltip(
+                                        "Projektgebühr / Mob-Demob / Standby (Summe)")
+                                else:
+                                    ui.label(f"= {eur((it['qty'] or 0) * (it['price'] or 0))}").classes(
+                                        "text-xs text-gray-500 w-28")
                                 ui.input("Notiz", value=it["note"],
                                          on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
-                                         ).props("dense outlined").classes("w-64")
+                                         ).props("dense outlined").classes("w-48" if is_project else "w-64")
                             else:
                                 ui.number("Betrag", value=it["amount"], step=100,
                                           on_change=lambda e, it=it: (it.__setitem__("amount", e.value or 0),
@@ -481,6 +526,30 @@ def render() -> None:
 
                         if is_product:
                             _product_payment_row(it)
+                        if is_project:
+                            _project_row(it)
+
+            def _project_row(it: dict) -> None:
+                with ui.row().classes("items-center gap-2"):
+                    ui.number("Kunden-Ziel (Tage)", value=it["pdays"], min=0, max=365, step=1,
+                              on_change=lambda e, it=it: it.__setitem__("pdays", int(e.value or 0))
+                              ).props("dense outlined").classes("w-36").tooltip("Wann der Kunde zahlt")
+                    ui.label("Subunternehmer:").classes("text-xs text-gray-500")
+                    ui.number("Satz/Turbine (€)", value=it["sub_rate"], min=0, step=10,
+                              on_change=lambda e, it=it: (it.__setitem__("sub_rate", e.value or 0),
+                                                          _refresh_total())
+                              ).props("dense outlined").classes("w-32")
+                    ui.number("Sub-Fix (€)", value=it["sub_fixed"], min=0, step=100,
+                              on_change=lambda e, it=it: (it.__setitem__("sub_fixed", e.value or 0),
+                                                          _refresh_total())
+                              ).props("dense outlined").classes("w-28").tooltip(
+                        "Fixe Subunternehmer-Kosten (Standby, Mob-Demob, Setup)")
+                    ui.number("Sub-Ziel (Tage)", value=it["sdays"], min=0, max=365, step=1,
+                              on_change=lambda e, it=it: it.__setitem__("sdays", int(e.value or 0))
+                              ).props("dense outlined").classes("w-32").tooltip(
+                        "Wann wir den Subunternehmer zahlen (ab Monatsende)")
+                    ui.label(f"Netto {eur(_line_rev(it) - _line_sub(it))}").classes(
+                        "text-xs font-medium text-gray-600")
 
             def _product_payment_row(it: dict) -> None:
                 with ui.row().classes("items-center gap-2"):

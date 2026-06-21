@@ -22,8 +22,10 @@ from ..models import (
     LoanSchedule,
     OpexCategory,
     PnlLine,
+    RevenueCellEntry,
     RevenuePlanMonth,
     RevenueStream,
+    RevenueType,
     SalaryMonth,
 )
 from .calendar_at import month_in_horizon
@@ -83,6 +85,17 @@ def pnl_view(session: Session, year: int, scenario_id: int = 1) -> list[PnlRow]:
         else:  # OPEX
             key = (cat.opex_category.value if cat.opex_category else OpexCategory.OTHER.value)
             opex_by_cat.setdefault(key, _zeros())[cp.month - 1] += amt
+
+    # Project subcontractor costs (embedded in revenue cells) → Bezogene Leistungen.
+    for ce in session.exec(select(RevenueCellEntry).where(RevenueCellEntry.year == year)).all():
+        if ce.stream_id not in rev_ids or not month_in_horizon(year, ce.month, settings):
+            continue
+        st = streams.get(ce.stream_id)
+        if st is None or st.rtype != RevenueType.PROJECT:
+            continue
+        sub = (ce.qty or 0) * (ce.sub_rate or 0) + (ce.sub_fixed or 0)
+        if sub:
+            external[ce.month - 1] += sub
 
     # Personnel (internal all-in vs external/contractor)
     personnel_int, personnel_ext = _zeros(), _zeros()
