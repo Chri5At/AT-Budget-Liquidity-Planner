@@ -21,7 +21,7 @@ from ...models import (
 )
 from ...models.enums import PNL_LINE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
-from ..formatting import MONTHS_DE, YEARS, eur
+from ..formatting import MONTHS_DE, YEARS, eur, page_title
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 
 CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
@@ -179,10 +179,9 @@ def _load_tree_rows(year: int, scenario_id: int, collapsed: set) -> list[dict]:
 def render() -> None:
     state = {"year": YEARS[0], "scenario": 1, "collapsed": set()}
 
-    ui.label("Ausgaben").classes("text-xl font-bold")
-    ui.label("Aufwände je Kategorie und Monat. Kategorien gruppieren Positionen; die "
-             "Kategoriezeile zeigt die Summe. Die Bereich-Zuordnung steuert die GuV."
-             ).classes("text-sm text-gray-500")
+    page_title("Ausgaben",
+               "Aufwände je Kategorie und Monat. Kategorien gruppieren Positionen; die "
+               "Kategoriezeile zeigt die Summe. Die Bereich-Zuordnung steuert die GuV.")
 
     with ui.row().classes("items-center gap-3 my-2"):
         ui.select(YEARS, value=state["year"], label="Jahr",

@@ -11,7 +11,7 @@ from ...models import Employee, PaymentTerm, SalaryMonth, SplitModel
 from ...models.enums import PAYMENT_TERM_DE, SPLIT_MODEL_DE
 from ...engine.payroll_at import employee_year_cost, ruleset_for_year
 from ...services.recompute import recompute_all
-from ..formatting import MONTHS_DE, YEARS, eur
+from ..formatting import MONTHS_DE, YEARS, eur, page_title
 from ..components.month_grid import editable_month_grid
 
 SONDER_MONTHS = (6, 11)
@@ -101,11 +101,10 @@ def _save_row(year: int, data: dict) -> None:
 def render() -> None:
     state = {"year": YEARS[0]}
 
-    ui.label("Mitarbeiter & Personalkosten").classes("text-xl font-bold")
-    ui.label("Laufendes Bruttogehalt je Monat eingeben. Sonderzahlungen (13./14., Urlaubs-/"
-             "Weihnachtsgeld) separat darunter — so sind sie einzeln anpassbar (z. B. anteilig "
-             "bei unterjährigem Eintritt). Netto wird nach österreichischem Tarif berechnet."
-             ).classes("text-sm text-gray-500")
+    page_title("Mitarbeiter & Personalkosten",
+               "Laufendes Bruttogehalt je Monat eingeben. Sonderzahlungen (13./14., Urlaubs-/"
+               "Weihnachtsgeld) separat darunter — so sind sie einzeln anpassbar (z. B. anteilig "
+               "bei unterjährigem Eintritt). Netto wird nach österreichischem Tarif berechnet.")
 
     with ui.row().classes("items-center gap-3 my-2"):
         ui.select(YEARS, value=state["year"], label="Jahr",
@@ -136,7 +135,12 @@ def render() -> None:
         with ui.row().classes("items-center gap-3 mt-3"):
             ui.label("Sonderzahlungen").classes("text-sm font-medium")
             ui.button("Urlaubs und Weihnachtsgeld errechnen", icon="content_copy",
-                      on_click=lambda: _fill_sonder()).props("outline")
+                      on_click=lambda: _fill_sonder()).props("outline").tooltip(
+                "Berechnet je Sonderzahlung das aliquote Jahressechstel aus dem laufenden "
+                "Bruttogehalt (1 Monat pro vollem Jahr, anteilig nach Dienstmonaten). "
+                "Urlaubsgeld → Juni bzw. erster beschäftigter Monat (z. B. Juli bei Eintritt "
+                "nach Juni); Weihnachtsgeld → November bzw. letzter beschäftigter Monat. "
+                "Einzelne Werte bleiben danach editierbar.")
         lead = [{"headerName": "Mitarbeiter", "field": "name", "pinned": "left", "width": 230}]
         rows = _load_special_rows(state["year"])
 

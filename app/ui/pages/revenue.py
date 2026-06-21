@@ -15,7 +15,7 @@ from ...models import (
 )
 from ...models.enums import REVENUE_PAY_ROUTINE_DE, REVENUE_TYPE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
-from ..formatting import MONTHS_DE, YEARS, eur
+from ..formatting import MONTHS_DE, YEARS, eur, page_title
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 
 # Routines that need a deposit field, and the one that needs Raten/Laufzeit.
@@ -246,9 +246,10 @@ def _save_row(year: int, data: dict) -> None:
 def render() -> None:
     state = {"year": YEARS[0], "scenario": 1, "collapsed": set()}
 
-    ui.label("Einnahmen").classes("text-xl font-bold")
-    ui.label("Umsatz je Einnahmequelle und Monat. Kategorien gruppieren Quellen; die "
-             "Kategoriezeile zeigt die Summe.").classes("text-sm text-gray-500")
+    page_title("Einnahmen",
+               "Umsatz je Einnahmequelle und Monat. Kategorien gruppieren Quellen; die "
+               "Kategoriezeile zeigt die Summe. Doppelklick auf eine Zelle öffnet die "
+               "Detail-Aufstellung (Menge × Preis, Zahlungsweisen, Projekt/Subunternehmer).")
 
     with ui.row().classes("items-center gap-3 my-2"):
         ui.select(YEARS, value=state["year"], label="Jahr",
