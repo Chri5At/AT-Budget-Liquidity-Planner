@@ -1,49 +1,56 @@
-"""Application shell: header, tabs and panel routing."""
+"""Application shell: a slim header, a collapsible left sidebar, and panel routing."""
 from __future__ import annotations
 
 from nicegui import ui
 
 from ..config import APP_TITLE
 from ..db import get_session, get_settings
-from ..services.recompute import recompute_all
 from .pages import costs, employees, liquidity, pnl, revenue, scenarios, settings, snapshots
+
+# (tab key, icon, label, render fn)
+_NAV = [
+    ("emp", "groups", "Mitarbeiter", employees.render),
+    ("rev", "trending_up", "Einnahmen", revenue.render),
+    ("cost", "trending_down", "Ausgaben", costs.render),
+    ("pnl", "table_chart", "GuV / Budget", pnl.render),
+    ("liq", "account_balance", "Liquidität", liquidity.render),
+    ("scn", "alt_route", "Szenarien", scenarios.render),
+    ("snap", "photo_camera", "Snapshots", snapshots.render),
+    ("set", "settings", "Einstellungen", settings.render),
+]
 
 
 @ui.page("/")
 def index() -> None:
     with get_session() as s:
         company = get_settings(s).company_name
+    nav_state = {"mini": False}
 
-    with ui.header().classes("items-center justify-between bg-primary"):
-        ui.label(f"{APP_TITLE} · {company}").classes("text-lg font-bold")
-        ui.button("Neu berechnen", icon="refresh",
-                  on_click=lambda: (recompute_all(), ui.notify("Liquidität neu berechnet",
-                                                               type="positive"))).props("flat color=white")
+    drawer = (ui.left_drawer(value=True, fixed=True).props("bordered :width=210 :mini-width=60")
+              .classes("bg-grey-1"))
 
-    with ui.tabs().classes("w-full") as tabs:
-        t_emp = ui.tab("Mitarbeiter", icon="groups")
-        t_rev = ui.tab("Einnahmen", icon="trending_up")
-        t_cost = ui.tab("Ausgaben", icon="trending_down")
-        t_pnl = ui.tab("GuV / Budget", icon="table_chart")
-        t_liq = ui.tab("Liquidität", icon="account_balance")
-        t_scn = ui.tab("Szenarien", icon="alt_route")
-        t_snap = ui.tab("Snapshots", icon="photo_camera")
-        t_set = ui.tab("Einstellungen", icon="settings")
+    def _toggle() -> None:
+        nav_state["mini"] = not nav_state["mini"]
+        drawer.props(add="mini") if nav_state["mini"] else drawer.props(remove="mini")
 
-    with ui.tab_panels(tabs, value=t_emp).classes("w-full"):
-        with ui.tab_panel(t_emp):
-            employees.render()
-        with ui.tab_panel(t_rev):
-            revenue.render()
-        with ui.tab_panel(t_cost):
-            costs.render()
-        with ui.tab_panel(t_pnl):
-            pnl.render()
-        with ui.tab_panel(t_liq):
-            liquidity.render()
-        with ui.tab_panel(t_scn):
-            scenarios.render()
-        with ui.tab_panel(t_snap):
-            snapshots.render()
-        with ui.tab_panel(t_set):
-            settings.render()
+    with ui.header().props("dense").classes("items-center bg-primary"):
+        ui.button(icon="menu", on_click=_toggle).props("flat color=white dense round")
+        ui.label(f"{APP_TITLE} · {company}").classes("text-base font-bold text-white")
+
+    # Hidden tab controller drives the panels; the sidebar sets its value.
+    with ui.tabs().props("vertical").classes("hidden") as tabs:
+        tab_refs = {key: ui.tab(label, icon=icon) for key, icon, label, _ in _NAV}
+
+    with drawer:
+        with ui.list().props("padding").classes("w-full"):
+            for key, icon, label, _ in _NAV:
+                with ui.item(on_click=lambda t=tab_refs[key]: tabs.set_value(t)).props("clickable"):
+                    with ui.item_section().props("avatar"):
+                        ui.icon(icon).classes("text-primary")
+                    with ui.item_section():
+                        ui.item_label(label)
+
+    with ui.tab_panels(tabs, value=tab_refs["emp"]).classes("w-full"):
+        for key, icon, label, render in _NAV:
+            with ui.tab_panel(tab_refs[key]):
+                render()
