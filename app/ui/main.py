@@ -6,7 +6,7 @@ from nicegui import ui
 from ..config import APP_TITLE
 from ..db import get_session, get_settings
 from ..services.recompute import recompute_all
-from .pages import costs, employees, liquidity, pnl, revenue, scenarios, settings
+from .pages import costs, employees, liquidity, pnl, revenue, scenarios, settings, snapshots
 
 
 @ui.page("/")
@@ -27,6 +27,7 @@ def index() -> None:
         t_pnl = ui.tab("GuV / Budget", icon="table_chart")
         t_liq = ui.tab("Liquidität", icon="account_balance")
         t_scn = ui.tab("Szenarien", icon="alt_route")
+        t_snap = ui.tab("Snapshots", icon="photo_camera")
         t_set = ui.tab("Einstellungen", icon="settings")
 
     with ui.tab_panels(tabs, value=t_emp).classes("w-full"):
@@ -42,5 +43,7 @@ def index() -> None:
             liquidity.render()
         with ui.tab_panel(t_scn):
             scenarios.render()
+        with ui.tab_panel(t_snap):
+            snapshots.render()
         with ui.tab_panel(t_set):
             settings.render()
