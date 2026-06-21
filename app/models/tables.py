@@ -246,6 +246,19 @@ class ActualValue(SQLModel, table=True):
     amount: float = 0.0
 
 
+class Snapshot(SQLModel, table=True):
+    """A saved copy of the full plan (all source rows) at a point in time.
+
+    The payload is JSON of every source table. A snapshot can be restored (loaded
+    back into the app) or compared (its KPIs vs the current plan).
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    created_at: str = ""   # ISO datetime string
+    note: str = ""
+    payload: str = ""      # JSON {ModelName: [row, ...]}
+
+
 class CashflowEntry(SQLModel, table=True):
     """DERIVED ledger — rebuilt by services.recompute; do not edit by hand."""
     id: Optional[int] = Field(default=None, primary_key=True)
