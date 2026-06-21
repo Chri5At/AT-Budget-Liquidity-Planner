@@ -182,7 +182,8 @@ def build_entries(session: Session, scenario_id: int = 1) -> list[CashflowEntry]
             continue
         amount = abs(cp.amount)
         inv = last_day_of_month(cp.year, cp.month)
-        cash = shift_by_term(inv, cat.payment_term, subdiv)
+        cdays = cat.payment_days if cat.payment_days is not None else TERM_DAYS[cat.payment_term]
+        cash = shift_by_days(inv, cdays, subdiv)
         kind = CashflowKind.COGS_OUT if cat.pnl_line == PnlLine.COGS else CashflowKind.COST_OUT
         entries.append(CashflowEntry(
             date=cash, kind=kind, amount=-amount,

@@ -20,6 +20,7 @@ from .tables import (  # noqa: F401
     ActualValue,
     CashflowEntry,
     CostCategory,
+    CostCellEntry,
     CostPlanMonth,
     Depreciation,
     Employee,
