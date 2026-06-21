@@ -99,6 +99,8 @@ def _apply_cell_content(s, cat_id: int, year: int, month: int, *, use_list: bool
 
 
 def _save_amount_cell(cat_id: int, year: int, month: int, amount: float) -> None:
+    # No recompute here — the cashflow ledger rebuilds when Liquidität opens, so
+    # rapid cell edits stay instant without a page refresh.
     with get_session() as s:
         for e in s.exec(select(CostCellEntry).where(
                 CostCellEntry.category_id == cat_id, CostCellEntry.year == year,
@@ -107,7 +109,19 @@ def _save_amount_cell(cat_id: int, year: int, month: int, amount: float) -> None
         pm = _cell_pm(s, cat_id, year, month)
         pm.amount = float(amount or 0)
         s.commit()
-    recompute_all()
+
+
+def _cat_month_total(s, cat_id: int, year: int, month: int) -> int:
+    ids = [cat_id] + [c.id for c in s.exec(select(CostCategory).where(
+        CostCategory.parent_id == cat_id)).all()]
+    total = 0.0
+    for cid in ids:
+        pm = s.exec(select(CostPlanMonth).where(
+            CostPlanMonth.category_id == cid, CostPlanMonth.year == year,
+            CostPlanMonth.month == month)).first()
+        if pm:
+            total += pm.amount
+    return round(total)
 
 
 def _save_name_cell(cat_id: int, name: str) -> None:
@@ -119,12 +133,13 @@ def _save_name_cell(cat_id: int, name: str) -> None:
             s.commit()
 
 
-def _data_row(s, c: CostCategory, year: int, kind: str, *, name: str | None = None) -> dict:
+def _data_row(s, c: CostCategory, year: int, kind: str, *, name: str | None = None,
+              cat_id: int | None = None) -> dict:
     months = {p.month: p for p in s.exec(select(CostPlanMonth).where(
         CostPlanMonth.category_id == c.id, CostPlanMonth.year == year)).all()}
     ent_months = {e.month for e in s.exec(select(CostCellEntry).where(
         CostCellEntry.category_id == c.id, CostCellEntry.year == year)).all()}
-    row = {"rid": f"{kind}-{c.id}", "id": c.id, "kind": kind,
+    row = {"rid": f"{kind}-{c.id}", "id": c.id, "kind": kind, "cat_id": cat_id,
            "name": name if name is not None else c.name, "bereich": _bereich(c)}
     for m in range(1, 13):
         pm = months.get(m)
@@ -168,9 +183,10 @@ def _load_tree_rows(year: int, scenario_id: int, collapsed: set) -> list[dict]:
                     cat[f"detail{m}"] = False
                 rows.append(cat)
                 if expanded:
-                    rows.append(_data_row(s, c, year, "direct", name="↳ Allgemein (direkt)"))
+                    rows.append(_data_row(s, c, year, "direct",
+                                          name="↳ Allgemein (direkt)", cat_id=c.id))
                     for kid in kids:
-                        rows.append(_data_row(s, kid, year, "child"))
+                        rows.append(_data_row(s, kid, year, "child", cat_id=c.id))
             else:
                 rows.append(_data_row(s, c, year, "leaf"))
         return rows
@@ -226,6 +242,7 @@ def render() -> None:
             "rowDragManaged": True, "animateRows": True, "rowHeight": 30, "headerHeight": 34,
             ":getRowId": "params => params.data.rid", ":getRowStyle": _ROW_STYLE,
         }).classes("w-full").style(f"height: {34 + max(1, len(rows)) * 30 + 20}px")
+        state["grid"] = grid
         grid.on("cellValueChanged", _on_cell_edit)
         grid.on("cellClicked", _on_cell_click)
         grid.on("cellDoubleClicked", _on_cell_dblclick)
@@ -253,9 +270,14 @@ def render() -> None:
         elif isinstance(col, str) and col.startswith("m") and col[1:].isdigit():
             if data.get(f"detail{col[1:]}"):
                 return
-            _save_amount_cell(cid, state["year"], int(col[1:]), data.get(col, 0))
-            if data.get("kind") in ("child", "direct"):
-                matrix.refresh()
+            month = int(col[1:])
+            _save_amount_cell(cid, state["year"], month, data.get(col, 0))
+            cat_id = data.get("cat_id")
+            grid = state.get("grid")
+            if cat_id and grid is not None:
+                with get_session() as s:
+                    total = _cat_month_total(s, int(cat_id), state["year"], month)
+                grid.run_row_method(f"cat-{cat_id}", "setDataValue", col, total)
 
     def _on_cell_click(e) -> None:
         a = e.args or {}

@@ -133,7 +133,11 @@ def _apply_cell_content(s, stream: RevenueStream, year: int, month: int, *,
 
 
 def _save_amount_cell(stream_id: int, year: int, month: int, amount: float) -> None:
-    """Direct (single-click) edit: set the value and drop any line breakdown."""
+    """Direct (single-click) edit: set the value and drop any line breakdown.
+
+    No recompute here — the cashflow ledger is rebuilt when the Liquidität page is
+    opened, so rapid cell edits stay instant and don't trigger a page refresh.
+    """
     with get_session() as s:
         for e in s.exec(select(RevenueCellEntry).where(
                 RevenueCellEntry.stream_id == stream_id, RevenueCellEntry.year == year,
@@ -143,7 +147,20 @@ def _save_amount_cell(stream_id: int, year: int, month: int, amount: float) -> N
         pm.amount = float(amount or 0)
         pm.units = 0.0
         s.commit()
-    recompute_all()
+
+
+def _cat_month_total(s, cat_id: int, year: int, month: int) -> int:
+    """Category month sum = the category's own value + all its children's values."""
+    ids = [cat_id] + [c.id for c in s.exec(select(RevenueStream).where(
+        RevenueStream.parent_id == cat_id)).all()]
+    total = 0.0
+    for cid in ids:
+        pm = s.exec(select(RevenuePlanMonth).where(
+            RevenuePlanMonth.stream_id == cid, RevenuePlanMonth.year == year,
+            RevenuePlanMonth.month == month)).first()
+        if pm:
+            total += pm.amount
+    return round(total)
 
 
 def _save_name_cell(stream_id: int, name: str) -> None:
@@ -155,13 +172,14 @@ def _save_name_cell(stream_id: int, name: str) -> None:
             s.commit()
 
 
-def _data_row(s, st: RevenueStream, year: int, kind: str, *, name: str | None = None) -> dict:
+def _data_row(s, st: RevenueStream, year: int, kind: str, *, name: str | None = None,
+              cat_id: int | None = None) -> dict:
     """A normal editable data row (leaf / child / direct) for one stream."""
     months = {p.month: p for p in s.exec(select(RevenuePlanMonth).where(
         RevenuePlanMonth.stream_id == st.id, RevenuePlanMonth.year == year)).all()}
     ent_months = {e.month for e in s.exec(select(RevenueCellEntry).where(
         RevenueCellEntry.stream_id == st.id, RevenueCellEntry.year == year)).all()}
-    row = {"rid": f"{kind}-{st.id}", "id": st.id, "kind": kind,
+    row = {"rid": f"{kind}-{st.id}", "id": st.id, "kind": kind, "cat_id": cat_id,
            "name": name if name is not None else st.name,
            "typ": REVENUE_TYPE_DE[st.rtype]}
     for m in range(1, 13):
@@ -213,9 +231,10 @@ def _load_tree_rows(year: int, scenario_id: int, collapsed: set) -> list[dict]:
                     cat[f"detail{m}"] = False
                 rows.append(cat)
                 if expanded:
-                    rows.append(_data_row(s, st, year, "direct", name="↳ Allgemein (direkt)"))
+                    rows.append(_data_row(s, st, year, "direct",
+                                          name="↳ Allgemein (direkt)", cat_id=st.id))
                     for kid in kids:
-                        rows.append(_data_row(s, kid, year, "child"))
+                        rows.append(_data_row(s, kid, year, "child", cat_id=st.id))
             else:
                 rows.append(_data_row(s, st, year, "leaf"))
         return rows
@@ -296,6 +315,7 @@ def render() -> None:
             ":getRowId": "params => params.data.rid",
             ":getRowStyle": _ROW_STYLE,
         }).classes("w-full").style(f"height: {34 + max(1, len(rows)) * 30 + 20}px")
+        state["grid"] = grid
         grid.on("cellValueChanged", _on_cell_edit)
         grid.on("cellClicked", _on_cell_click)
         grid.on("cellDoubleClicked", _on_cell_dblclick)
@@ -325,11 +345,16 @@ def render() -> None:
             # Never overwrite a cell that has a line-item breakdown (data protection).
             if data.get(f"detail{col[1:]}"):
                 return
-            _save_amount_cell(sid, state["year"], int(col[1:]), data.get(col, 0))
-            # A child/direct edit changes its category's total — reload so the
-            # category row's sum updates immediately (no collapse/expand needed).
-            if data.get("kind") in ("child", "direct"):
-                matrix.refresh()
+            month = int(col[1:])
+            _save_amount_cell(sid, state["year"], month, data.get(col, 0))
+            # A child/direct edit changes its category total — update ONLY that
+            # category's cell in place (no full refresh → keeps focus for fast editing).
+            cat_id = data.get("cat_id")
+            grid = state.get("grid")
+            if cat_id and grid is not None:
+                with get_session() as s:
+                    total = _cat_month_total(s, int(cat_id), state["year"], month)
+                grid.run_row_method(f"cat-{cat_id}", "setDataValue", col, total)
 
     def _on_cell_click(e) -> None:
         a = e.args or {}
