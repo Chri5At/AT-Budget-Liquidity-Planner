@@ -59,6 +59,14 @@ def _migrate() -> bool:
         _add_column_if_missing(conn, "revenuecellentry", "sub_rate", "sub_rate FLOAT DEFAULT 0")
         _add_column_if_missing(conn, "revenuecellentry", "sub_fixed", "sub_fixed FLOAT DEFAULT 0")
         _add_column_if_missing(conn, "revenuecellentry", "sub_days", "sub_days INTEGER")
+        # Ausgaben parity: grouping + flexible Zahlungsziel on cost categories,
+        # per-cell note/colour, and the cost cell-breakdown table.
+        _add_column_if_missing(conn, "costcategory", "payment_days", "payment_days INTEGER")
+        _add_column_if_missing(conn, "costcategory", "is_category", "is_category BOOLEAN DEFAULT 0")
+        _add_column_if_missing(conn, "costcategory", "parent_id", "parent_id INTEGER")
+        _add_column_if_missing(conn, "costcategory", "color", "color VARCHAR DEFAULT ''")
+        _add_column_if_missing(conn, "costplanmonth", "note", "note VARCHAR DEFAULT ''")
+        _add_column_if_missing(conn, "costplanmonth", "color", "color VARCHAR DEFAULT ''")
         if "salarymonth" in inspect(conn).get_table_names():
             cols = {c["name"] for c in inspect(conn).get_columns("salarymonth")}
             if "special" not in cols:

@@ -162,8 +162,13 @@ class CostCategory(SQLModel, table=True):
     opex_category: Optional[OpexCategory] = None
     supplier: str = ""
     payment_term: PaymentTerm = Field(default=PaymentTerm.NET30)
+    payment_days: Optional[int] = None   # flexible Zahlungsziel in days; overrides payment_term
     is_vatable: bool = True
     sort_order: int = 0
+    # Grouping (UI only), mirrors RevenueStream.
+    is_category: bool = False
+    parent_id: Optional[int] = Field(default=None, foreign_key="costcategory.id", index=True)
+    color: str = ""   # category row colour (CSS)
 
 
 class CostPlanMonth(SQLModel, table=True):
@@ -174,6 +179,20 @@ class CostPlanMonth(SQLModel, table=True):
     year: int
     month: int
     amount: float = 0.0
+    note: str = ""    # free note shown on the cell
+    color: str = ""   # optional cell background colour (CSS)
+
+
+class CostCellEntry(SQLModel, table=True):
+    """One line of a cost cell's breakdown (the advanced modal). amount = Betrag.
+    The owning CostPlanMonth.amount is recomputed as the sum of its lines."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    category_id: int = Field(foreign_key="costcategory.id", index=True)
+    year: int
+    month: int
+    sort_order: int = 0
+    amount: float = 0.0
+    note: str = ""
 
 
 class Depreciation(SQLModel, table=True):
