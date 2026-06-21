@@ -30,6 +30,7 @@ CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
 _CELL_PARSER = 'params => (params.newValue===""||params.newValue==null)?0:Number(params.newValue)'
 _CELL_STYLE = (
     'params => { if (params.data.kind === "category") return {fontWeight:"bold"};'
+    ' if (params.data.kind === "grandtotal") return {fontWeight:"bold", backgroundColor:"#e2e8f0"};'
     ' var c = params.data["color"+params.colDef.field.substring(1)];'
     ' return c?{backgroundColor:c}:null; }')
 _CELL_RENDER = (
@@ -41,6 +42,7 @@ _NAME_RENDER = (
     'params => { var k=params.data.kind, nm=params.data.name||"";'
     ' if (k==="category"){ var ic=params.data.expanded?"▼":"▶";'
     '   return "<span style=\'cursor:pointer;font-weight:bold\'>"+ic+" "+nm+"</span>"; }'
+    ' if (k==="grandtotal") return "<b>"+nm+"</b>";'
     ' if (k==="child"||k==="direct"){'
     '   return "<span style=\'padding-left:16px;color:#374151\'>"+nm+"</span>"; }'
     ' return nm; }')
@@ -235,13 +237,17 @@ def render() -> None:
         col_defs.append({"headerName": "Jahr", "field": "jahr", "pinned": "right", "width": 110,
                          "type": "numericColumn", "cellClass": "font-bold", ":valueGetter": year_getter,
                          ":valueFormatter": "p=>Math.round(p.value||0).toLocaleString('de-DE')+' €'"})
+        bottom = {"rid": "grandtotal", "kind": "grandtotal", "name": "Σ Gesamt / Monat"}
+        for m in range(1, 13):
+            bottom[f"m{m}"] = sum(r[f"m{m}"] for r in rows if r["kind"] in ("category", "leaf"))
         grid = ui.aggrid({
             "columnDefs": col_defs, "rowData": rows,
+            "pinnedBottomRowData": [bottom],
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
             "rowDragManaged": True, "animateRows": True, "rowHeight": 30, "headerHeight": 34,
             ":getRowId": "params => params.data.rid", ":getRowStyle": _ROW_STYLE,
-        }).classes("w-full").style(f"height: {34 + max(1, len(rows)) * 30 + 20}px")
+        }).classes("w-full").style(f"height: {34 + (max(1, len(rows)) + 1) * 30 + 20}px")
         state["grid"] = grid
         grid.on("cellValueChanged", _on_cell_edit)
         grid.on("cellClicked", _on_cell_click)
