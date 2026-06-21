@@ -78,16 +78,24 @@ def render() -> None:
 
             low = min(r.balance for r in rows)
             end = rows[-1].balance
+            sub_total = sum(r.subcontractor for r in rows)
             with ui.row().classes("gap-6 my-2"):
                 ui.label(f"Tiefststand: {eur(low)}").classes(
                     "text-sm font-semibold " + ("text-red-600" if low < 0 else "text-green-700"))
                 ui.label(f"Endsaldo: {eur(end)}").classes("text-sm font-semibold")
+                if sub_total:
+                    ui.label(f"Subunternehmer-Auszahlungen: {eur(sub_total)}").classes(
+                        "text-sm font-semibold").style("color:#b45309")
 
             col_defs = [
                 {"headerName": "Datum", "field": "label", "pinned": "left", "width": 110},
                 {"headerName": "Einzahlungen", "field": "inflow", "type": "numericColumn", "width": 130,
                  ":valueFormatter": "p => p.value? Math.round(p.value).toLocaleString('de-DE')+' €':''"},
                 {"headerName": "Auszahlungen", "field": "outflow", "type": "numericColumn", "width": 130,
+                 ":valueFormatter": "p => p.value? Math.round(p.value).toLocaleString('de-DE')+' €':''"},
+                {"headerName": "davon Subunternehmer", "field": "sub", "type": "numericColumn",
+                 "width": 160,
+                 ":cellStyle": "p => p.value ? {color:'#b45309', backgroundColor:'#fff7ed'} : null",
                  ":valueFormatter": "p => p.value? Math.round(p.value).toLocaleString('de-DE')+' €':''"},
                 {"headerName": "Saldo", "field": "net", "type": "numericColumn", "width": 120,
                  ":valueFormatter": "p => Math.round(p.value||0).toLocaleString('de-DE')+' €'"},
@@ -100,7 +108,7 @@ def render() -> None:
             ]
             row_data = [{
                 "label": r.label, "inflow": round(r.inflow), "outflow": round(r.outflow),
-                "net": round(r.net), "balance": round(r.balance),
+                "sub": round(r.subcontractor), "net": round(r.net), "balance": round(r.balance),
                 "balance_no_eu": round(r.balance_no_eu),
             } for r in rows]
             ui.aggrid({

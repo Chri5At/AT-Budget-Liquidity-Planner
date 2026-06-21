@@ -28,6 +28,46 @@ def _round2(x: float) -> float:
     return round(x + 0.0, 2)
 
 
+# --- Projekt (inspection) economics ----------------------------------------------
+
+def project_line_revenue(qty: float, price: float, fixed_fee: float) -> float:
+    """Customer income for a project line = turbines × price + fixed fees."""
+    return (qty or 0) * (price or 0) + (fixed_fee or 0)
+
+
+def project_line_sub(qty: float, sub_rate: float, sub_fixed: float) -> float:
+    """Subcontractor cost for a project line = turbines × rate + fixed add-on."""
+    return (qty or 0) * (sub_rate or 0) + (sub_fixed or 0)
+
+
+@dataclass
+class ProjectCash:
+    revenue_date: date | None
+    revenue: float
+    sub_date: date | None
+    sub: float
+
+
+def project_line_cashflows(year: int, month: int, *, qty: float, price: float,
+                           fixed_fee: float, customer_days: int, sub_rate: float,
+                           sub_fixed: float, sub_days: int, subdiv: str = "4") -> ProjectCash:
+    """Dated customer inflow and subcontractor outflow for one project line.
+
+    Both are invoiced at month-end; the customer pays after `customer_days`, the
+    subcontractor is paid after `sub_days` (both banking-day adjusted). The GuV
+    books revenue gross and the subcontractor cost as Bezogene Leistungen.
+    """
+    base = last_day_of_month(year, month)
+    revenue = _round2(project_line_revenue(qty, price, fixed_fee))
+    sub = _round2(project_line_sub(qty, sub_rate, sub_fixed))
+    return ProjectCash(
+        revenue_date=shift_by_days(base, customer_days, subdiv) if revenue else None,
+        revenue=revenue,
+        sub_date=shift_by_days(base, sub_days, subdiv) if sub else None,
+        sub=sub,
+    )
+
+
 def _add_months_to_date(d: date, n: int) -> date:
     """Shift a date by n months, clamping the day to the target month length."""
     total = d.month - 1 + n

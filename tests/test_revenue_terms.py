@@ -1,7 +1,13 @@
 """Liquidity-critical: product payment routines produce the right cash dates/amounts."""
 from datetime import date
 
-from app.engine.revenue_terms import deposit_amount, product_line_cashflows
+from app.engine.revenue_terms import (
+    deposit_amount,
+    product_line_cashflows,
+    project_line_cashflows,
+    project_line_revenue,
+    project_line_sub,
+)
 from app.models.enums import RevenuePayRoutine as R
 
 
@@ -69,3 +75,32 @@ def test_rounding_remainder_on_last_rate():
     assert _sum(bits) == 100
     rates = [b for b in bits if b.label.startswith("Rate")]
     assert rates[0].amount == 33.33 and rates[2].amount == 33.34
+
+
+# --- Projekt (inspection) economics ----------------------------------------------
+
+def test_project_line_amounts():
+    # 10 turbines × 2000 + 5000 fixed fees = 25000 customer income.
+    assert project_line_revenue(10, 2000, 5000) == 25000
+    # subcontractor: 10 × 800 + 2000 fixed add-on = 10000.
+    assert project_line_sub(10, 800, 2000) == 10000
+
+
+def test_project_line_cashflow_dates_and_net():
+    # Inspection in March: customer pays in 60 days, subcontractor in 30 days.
+    pc = project_line_cashflows(2026, 3, qty=10, price=2000, fixed_fee=5000,
+                                customer_days=60, sub_rate=800, sub_fixed=2000, sub_days=30)
+    assert pc.revenue == 25000 and pc.sub == 10000
+    # 31.03.2026 + 60 days = 30.05 (Sat) → prior banking day 29.05.2026.
+    assert pc.revenue_date == date(2026, 5, 29)
+    # 31.03.2026 + 30 days = 30.04.2026 (Thu).
+    assert pc.sub_date == date(2026, 4, 30)
+    # Subcontractor is paid (Apr) before the customer pays (May) — the liquidity gap.
+    assert pc.sub_date < pc.revenue_date
+
+
+def test_project_line_zero_parts_omitted():
+    pc = project_line_cashflows(2026, 1, qty=0, price=0, fixed_fee=0,
+                                customer_days=30, sub_rate=0, sub_fixed=0, sub_days=30)
+    assert pc.revenue == 0 and pc.sub == 0
+    assert pc.revenue_date is None and pc.sub_date is None

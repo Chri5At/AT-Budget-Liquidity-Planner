@@ -44,7 +44,7 @@ from .calendar_at import (
     vat_due_date,
 )
 from .payroll_at import employee_year_cost, ruleset_for_year
-from .revenue_terms import product_line_cashflows
+from .revenue_terms import product_line_cashflows, project_line_cashflows
 from .scenarios import effective_cost_ids, effective_revenue_ids, get_scenario
 
 
@@ -141,6 +141,29 @@ def build_entries(session: Session, scenario_id: int = 1) -> list[CashflowEntry]
                     entries.append(CashflowEntry(
                         date=bit.date, kind=CashflowKind.REVENUE_IN, amount=+bit.amount,
                         source_kind="revenue", source_id=stream.id, memo=memo))
+        elif stream.rtype == RevenueType.PROJECT and lines:
+            # Each line: customer inflow at customer terms, subcontractor outflow at
+            # the sub terms. Subcontractor cost is Bezogene Leistungen (COST_OUT).
+            for ln in lines:
+                pdays = ln.payment_days if ln.payment_days is not None else stream_days
+                sdays = ln.sub_days if ln.sub_days is not None else pdays
+                pc = project_line_cashflows(
+                    rp.year, rp.month, qty=ln.qty, price=ln.price, fixed_fee=ln.fixed_fee,
+                    customer_days=pdays, sub_rate=ln.sub_rate, sub_fixed=ln.sub_fixed,
+                    sub_days=sdays, subdiv=subdiv)
+                if pc.revenue:
+                    entries.append(CashflowEntry(
+                        date=pc.revenue_date, kind=CashflowKind.REVENUE_IN, amount=+pc.revenue,
+                        source_kind="revenue", source_id=stream.id,
+                        memo=stream.name + (f" · {ln.note}" if ln.note else "")))
+                if pc.sub:
+                    entries.append(CashflowEntry(
+                        date=pc.sub_date, kind=CashflowKind.COST_OUT, amount=-pc.sub,
+                        source_kind="subcontractor", source_id=stream.id,
+                        memo=f"{stream.name} · Subunternehmer"
+                             + (f" ({ln.note})" if ln.note else "")))
+                    if stream.is_vatable:   # input VAT on the subcontractor invoice
+                        vat_by_month[(rp.year, rp.month)] -= pc.sub * VAT_RATE
         else:
             cash = shift_by_days(last_day_of_month(rp.year, rp.month), stream_days, subdiv)
             entries.append(CashflowEntry(

@@ -54,6 +54,11 @@ def _migrate() -> bool:
                                "deposit_value FLOAT DEFAULT 0")
         _add_column_if_missing(conn, "revenuecellentry", "rate_count", "rate_count INTEGER DEFAULT 0")
         _add_column_if_missing(conn, "revenuecellentry", "rate_months", "rate_months INTEGER DEFAULT 0")
+        # Projekt (inspection) line extras: income fixed fee + subcontractor cost/terms.
+        _add_column_if_missing(conn, "revenuecellentry", "fixed_fee", "fixed_fee FLOAT DEFAULT 0")
+        _add_column_if_missing(conn, "revenuecellentry", "sub_rate", "sub_rate FLOAT DEFAULT 0")
+        _add_column_if_missing(conn, "revenuecellentry", "sub_fixed", "sub_fixed FLOAT DEFAULT 0")
+        _add_column_if_missing(conn, "revenuecellentry", "sub_days", "sub_days INTEGER")
         if "salarymonth" in inspect(conn).get_table_names():
             cols = {c["name"] for c in inspect(conn).get_columns("salarymonth")}
             if "special" not in cols:

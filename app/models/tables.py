@@ -145,6 +145,13 @@ class RevenueCellEntry(SQLModel, table=True):
     deposit_value: float = 0.0           # the % (0-100) or € amount
     rate_count: int = 0                  # Anzahl Raten (installments)
     rate_months: int = 0                 # Laufzeit in Monaten (span of the installments)
+    # --- Projekt (inspection) extras -------------------------------------------
+    # Income = qty*price + fixed_fee. Subcontractor cost = qty*sub_rate + sub_fixed,
+    # paid on its own term (sub_days) — booked as Bezogene Leistungen in the GuV.
+    fixed_fee: float = 0.0               # income fixed fees on top (project/mob-demob/standby)
+    sub_rate: float = 0.0                # subcontractor cost per turbine (Satz × Menge)
+    sub_fixed: float = 0.0               # subcontractor fixed add-on
+    sub_days: Optional[int] = None       # subcontractor Zahlungsziel (days from month-end)
 
 
 class CostCategory(SQLModel, table=True):
