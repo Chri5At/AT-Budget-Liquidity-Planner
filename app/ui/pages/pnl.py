@@ -6,19 +6,36 @@ from __future__ import annotations
 
 from nicegui import ui
 
+from sqlmodel import select
+
 from ...db import get_session
 from ...engine.pnl import pnl_view
 from ...engine.scenarios import list_scenarios
+from ...models import Depreciation
+from ...services.recompute import recompute_all
 from ..components.scenario_ui import scenario_select
 from ..formatting import MONTHS_DE, YEARS, eur
+
+
+def _save_depreciation(year: int, month: int, amount) -> None:
+    """Upsert the depreciation for one month to a single row (stored positive)."""
+    with get_session() as s:
+        for dp in s.exec(select(Depreciation).where(
+                Depreciation.year == year, Depreciation.month == month)).all():
+            s.delete(dp)
+        amt = abs(float(amount or 0))
+        if amt:
+            s.add(Depreciation(year=year, month=month, amount=amt))
+        s.commit()
 
 
 def render() -> None:
     state = {"year": YEARS[0], "scenario": 1}
 
     ui.label("GuV / Budget (Deckungsbeitragsrechnung)").classes("text-xl font-bold")
-    ui.label("Automatisch aus Einnahmen, Ausgaben und Mitarbeitern berechnet — keine "
-             "Verknüpfungen, kein #REF!.").classes("text-sm text-gray-500")
+    ui.label("Automatisch aus Einnahmen, Ausgaben und Mitarbeitern berechnet. Hellgelbe Zellen "
+             "(z. B. Abschreibungen) sind direkt editierbar — Klick in die Zelle, Wert eingeben."
+             ).classes("text-sm text-gray-500")
 
     with ui.row().classes("items-center gap-3 my-2"):
         ui.select(YEARS, value=state["year"], label="Jahr",
@@ -60,10 +77,15 @@ def render() -> None:
         with get_session() as s:
             rows_model = pnl_view(s, state["year"], state["scenario"])
 
+        editable_month = "params => !!params.data._editable_key"
+        editable_style = ("params => params.data._editable_key "
+                          "? {backgroundColor:'#fffbeb', cursor:'pointer'} : null")
         col_defs = [{"headerName": "Position", "field": "label", "pinned": "left", "width": 270}]
         for m in range(1, 13):
             col_defs.append({"headerName": MONTHS_DE[m - 1], "field": f"m{m}",
-                             "type": "numericColumn", "width": 90,
+                             "type": "numericColumn", "width": 90, ":editable": editable_month,
+                             ":cellStyle": editable_style,
+                             ":valueParser": "p => (p.newValue===''||p.newValue==null)?0:Number(p.newValue)",
                              ":valueFormatter":
                              "p => (p.value? Math.round(p.value).toLocaleString('de-DE'):'')"})
         col_defs.append({"headerName": "Gesamt", "field": "jahr", "pinned": "right", "width": 130,
@@ -73,19 +95,32 @@ def render() -> None:
 
         row_data = []
         for r in rows_model:
-            d = {"label": r.label, "jahr": round(r.annual), "_kind": r.kind}
+            d = {"label": r.label, "jahr": round(r.annual), "_kind": r.kind,
+                 "_editable_key": r.editable_key}
             for m in range(1, 13):
                 d[f"m{m}"] = round(r.values[m - 1])
             row_data.append(d)
 
         # Bold the subtotal/section rows via a rowClassRules on the hidden _kind field.
-        ui.aggrid({
+        grid = ui.aggrid({
             "columnDefs": col_defs,
             "rowData": row_data,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
+            "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
             ":rowClassRules": "{'font-bold bg-blue-50': p => p.data._kind === 'subtotal',"
                               " 'font-semibold': p => p.data._kind === 'section'}",
         }).classes("w-full").style("height: calc(100vh - 300px); min-height: 360px")
+        grid.on("cellValueChanged", _on_edit)
+
+    def _on_edit(e) -> None:
+        a = e.args or {}
+        data = a.get("data") or {}
+        col = a.get("colId") or a.get("column") or ""
+        if data.get("_editable_key") == "depreciation" and isinstance(col, str) \
+                and col.startswith("m") and col[1:].isdigit():
+            _save_depreciation(state["year"], int(col[1:]), data.get(col, 0))
+            recompute_all()
+            table.refresh()
 
     def _change_year(value: int) -> None:
         state["year"] = int(value)

@@ -40,6 +40,7 @@ class PnlRow:
     values: list[float] = field(default_factory=lambda: [0.0] * 12)
     kind: str = "line"   # 'line' | 'subtotal' | 'section'
     indent: int = 0
+    editable_key: str = ""   # non-empty → cells are editable (routes the save), e.g. "depreciation"
 
     @property
     def annual(self) -> float:
@@ -166,7 +167,7 @@ def pnl_view(session: Session, year: int, scenario_id: int = 1) -> list[PnlRow]:
     rows.append(PnlRow("7.  = EBITDA", ebitda, kind="subtotal"))
 
     # 8.–10. Abschreibung, EBIT, Zinsen, EBT
-    rows.append(PnlRow("8.  − Abschreibungen", neg(depreciation)))
+    rows.append(PnlRow("8.  − Abschreibungen", neg(depreciation), editable_key="depreciation"))
     rows.append(PnlRow("9.  = EBIT", ebit, kind="subtotal"))
     rows.append(PnlRow("      − Zinsen", neg(interest), indent=1))
     rows.append(PnlRow("10. = EBT (Ergebnis vor Steuern)", ebt, kind="subtotal"))
