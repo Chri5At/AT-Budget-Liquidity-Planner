@@ -98,20 +98,59 @@ def liquidity_view_for_scenario(session: Session, scenario_id: int) -> list[Buck
 
 
 @dataclass
+class PivotGroup:
+    name: str
+    order: float
+    totals: list[float]
+    items: list[tuple[str, list[float]]]     # (label, per-period values)
+
+
+@dataclass
 class PivotSection:
     name: str
-    totals: list[float]                      # per bucket
-    items: list[tuple[str, list[float]]]     # (label, per-bucket values)
+    totals: list[float]                      # per period
+    groups: list[PivotGroup]                 # category groups (Personal, IT, …)
 
 
 @dataclass
 class LiquidityPivot:
     buckets: list[date]
-    labels: list[str]                        # bucket labels (dd.mm.yyyy)
+    labels: list[str]                        # period labels
     sections: list[PivotSection]             # Einzahlungen, Auszahlungen
     saldo: list[float]
     bank: list[float]
     bank_no_eu: list[float]
+
+
+def _entry_group(e, cost_map: dict, rev_map: dict) -> tuple[str, float]:
+    """Map a cashflow entry to a display group (name, sort order) so the liquidity
+    rows mirror the category structure of the Einnahmen/Ausgaben pages."""
+    sk = e.source_kind
+    if sk == "employee":
+        return ("Personal", -100.0)
+    if sk == "subcontractor":
+        return ("Subunternehmer", 9000.0)
+    if sk == "vat":
+        return ("Finanzamt / USt", 9001.0)
+    if sk == "loan":
+        return ("Förderung / Darlehen", 8000.0)
+    if sk == "investment":
+        return ("Investitionen / Kapital", 7000.0)
+    if sk == "cost":
+        c = cost_map.get(e.source_id)
+        if c is not None:
+            top = cost_map.get(c.parent_id) if c.parent_id else c
+            top = top or c
+            return (top.name, float(top.sort_order))
+        return ("Sonstige Ausgaben", 9500.0)
+    if sk == "revenue":
+        st = rev_map.get(e.source_id)
+        if st is not None:
+            top = rev_map.get(st.parent_id) if st.parent_id else st
+            top = top or st
+            return (top.name, float(top.sort_order))
+        return ("Sonstige Einnahmen", 9500.0)
+    return ("Sonstiges", 9999.0)
 
 
 _MONTHS_DE = ["Jän", "Feb", "Mär", "Apr", "Mai", "Jun",
@@ -165,23 +204,36 @@ def liquidity_pivot(session: Session, entries=None, *, granularity: str = "biwee
         for b in bks:
             bucket_to_p[b] = pi
 
-    sec: dict[str, dict[str, list[float]]] = {
-        "Einzahlungen": defaultdict(lambda: [0.0] * n),
-        "Auszahlungen": defaultdict(lambda: [0.0] * n),
+    from ..models import CostCategory, RevenueStream
+    cost_map = {c.id: c for c in session.exec(select(CostCategory)).all()}
+    rev_map = {st.id: st for st in session.exec(select(RevenueStream)).all()}
+
+    # section -> group_name -> memo -> per-period values; plus each group's sort order.
+    sec: dict[str, dict[str, dict[str, list[float]]]] = {
+        "Einzahlungen": defaultdict(lambda: defaultdict(lambda: [0.0] * n)),
+        "Auszahlungen": defaultdict(lambda: defaultdict(lambda: [0.0] * n)),
     }
+    gorder: dict[tuple[str, str], float] = {}
     for e in entries:
         pi = bucket_to_p.get(e.bucket)
         if pi is None:
             continue
         section = "Einzahlungen" if e.kind in INFLOW_KINDS else "Auszahlungen"
-        sec[section][e.memo or "(ohne Bezeichnung)"][pi] += e.amount
+        gname, gord = _entry_group(e, cost_map, rev_map)
+        sec[section][gname][e.memo or "(ohne Bezeichnung)"][pi] += e.amount
+        gorder[(section, gname)] = gord
 
     sections = []
     for name in ("Einzahlungen", "Auszahlungen"):
-        items = sorted(sec[name].items(), key=lambda kv: -sum(abs(x) for x in kv[1]))
-        totals = [sum(vals[i] for _, vals in items) for i in range(n)]
-        sections.append(PivotSection(name, totals,
+        groups = []
+        for gname, memos in sec[name].items():
+            items = sorted(memos.items(), key=lambda kv: -sum(abs(x) for x in kv[1]))
+            gtotals = [sum(v[i] for _, v in items) for i in range(n)]
+            groups.append(PivotGroup(gname, gorder[(name, gname)], gtotals,
                                      [(lbl, [round(x) for x in vals]) for lbl, vals in items]))
+        groups.sort(key=lambda g: (g.order, g.name))
+        totals = [sum(g.totals[i] for g in groups) for i in range(n)]
+        sections.append(PivotSection(name, totals, groups))
 
     saldo, bank, bank_no_eu, labels = [], [], [], []
     for lbl, bks, end in periods:

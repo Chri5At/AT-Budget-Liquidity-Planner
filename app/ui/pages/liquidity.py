@@ -45,25 +45,30 @@ def _preset_range(preset: str) -> tuple[date | None, date | None]:
         return _quarter_range(today.year + 1, 1) if q == 4 else _quarter_range(today.year, q + 1)
     return None, None  # "all" / "custom" handled by the caller
 
-# Pivot grid JS: caret for sections, bold for subtotal/balance rows, red for negatives.
+# Pivot grid JS: caret for sections/groups, bold for subtotal/balance rows, red negatives.
 _PIV_NAME = (
     'params => { var k=params.data.kind, nm=params.data.pos||"";'
     ' if(k==="section"){var ic=params.data.expanded?"▼":"▶";'
     '   return "<span style=\'cursor:pointer;font-weight:bold\'>"+ic+" "+nm+"</span>";}'
+    ' if(k==="group"){var ig=params.data.expanded?"▼":"▶";'
+    '   return "<span style=\'cursor:pointer;font-weight:600;padding-left:14px\'>"+ig+" "+nm+"</span>";}'
     ' if(k==="total"||k==="balance") return "<b>"+nm+"</b>";'
-    ' return "<span style=\'padding-left:14px;color:#374151\'>"+nm+"</span>"; }')
+    ' return "<span style=\'padding-left:30px;color:#374151\'>"+nm+"</span>"; }')
 _PIV_STYLE = (
     'params => { var k=params.data.kind, s={};'
     ' if(k==="section"||k==="total") s={fontWeight:"bold",backgroundColor:"#eef2ff"};'
+    ' else if(k==="group") s={fontWeight:"600",backgroundColor:"#f5f7ff"};'
     ' else if(k==="balance"){ s={fontWeight:"bold"}; if(params.value<0) s.color="#b91c1c"; }'
     ' return Object.keys(s).length?s:null; }')
 
 
 def render() -> None:
     page_title("Liquidität",
-               "Horizontale Zeitachse: Buckets (15./Monatsende) als Spalten, Positionen als "
-               "Zeilen — gruppiert in Ein-/Auszahlungen (auf-/zuklappbar). Gehälter: Netto am "
-               "Monatsende, Abgaben am 15. des Folgemonats (Banktag-Anpassung).")
+               "Horizontale Zeitachse: Zeitperioden als Spalten, Positionen als Zeilen — "
+               "gruppiert in Ein-/Auszahlungen und darunter nach Kategorie (Personal sowie die "
+               "Ausgaben-Kategorien, in der dort definierten Reihenfolge; alles auf-/zuklappbar). "
+               "Zeitraum und Granularität oben einstellbar. Gehälter: Netto am Monatsende, "
+               "Abgaben am 15. des Folgemonats (Banktag-Anpassung).")
 
     state = {"collapsed": set(), "gran": "biweekly", "preset": "all",
              "start": "", "end": ""}
@@ -126,12 +131,9 @@ def render() -> None:
                           for nm, p in piv_scen]
                 legend = [nm for nm, _ in piv_scen]
             else:
-                series = [
-                    {"name": "Bank Status", "type": "line", "smooth": True, "data": pivot.bank},
-                    {"name": "ohne EU-Förderung", "type": "line", "smooth": True,
-                     "data": pivot.bank_no_eu, "lineStyle": {"type": "dashed"}},
-                ]
-                legend = ["Bank Status", "ohne EU-Förderung"]
+                series = [{"name": "Bank Status", "type": "line", "smooth": True,
+                           "data": pivot.bank, "areaStyle": {"opacity": 0.06}}]
+                legend = ["Bank Status"]
             ui.echart({
                 "tooltip": {"trigger": "axis"},
                 "legend": {"data": legend},
@@ -139,9 +141,9 @@ def render() -> None:
                 "yAxis": {"type": "value"},
                 "series": series,
             }).classes("w-full").style("height: 320px")
-            ui.label("„ohne EU-Förderung“ = derselbe Verlauf ohne die EU-Förder-Einzahlung "
-                     "(kein Szenario). Mehrere Szenarien werden im Diagramm überlagert."
-                     ).classes("text-xs text-gray-500")
+            if multi:
+                ui.label("Mehrere Szenarien werden im Diagramm überlagert."
+                         ).classes("text-xs text-gray-500")
 
             low = min(pivot.bank)
             with ui.row().classes("gap-6 my-2 flex-wrap"):
@@ -170,24 +172,30 @@ def render() -> None:
 
         rows_data = []
 
-        def mk(kind, pos, vals, expanded=None):
+        def mk(kind, pos, vals, expanded=None, rid=None):
             total = round(vals[-1]) if kind == "balance" else round(sum(vals))
-            d = {"rid": f"{kind}-{pos}", "kind": kind, "pos": pos, "sum": total}
+            d = {"rid": rid or f"{kind}-{pos}", "kind": kind, "pos": pos, "sum": total}
             if expanded is not None:
                 d["expanded"] = expanded
             for i, v in enumerate(vals):
                 d[f"b{i}"] = round(v)
             return d
 
+        # section → category group → line item, each collapsible.
         for sec in pivot.sections:
-            expanded = sec.name not in state["collapsed"]
-            rows_data.append(mk("section", sec.name, sec.totals, expanded))
-            if expanded:
-                for label, vals in sec.items:
-                    rows_data.append(mk("item", label, vals))
+            sec_open = sec.name not in state["collapsed"]
+            rows_data.append(mk("section", sec.name, sec.totals, sec_open))
+            if not sec_open:
+                continue
+            for g in sec.groups:
+                gkey = f"{sec.name}/{g.name}"
+                g_open = gkey not in state["collapsed"]
+                rows_data.append(mk("group", g.name, g.totals, g_open, rid=f"group-{gkey}"))
+                if g_open:
+                    for label, vals in g.items:
+                        rows_data.append(mk("item", label, vals, rid=f"item-{gkey}-{label}"))
         rows_data.append(mk("total", "= Saldo", pivot.saldo))
         rows_data.append(mk("balance", "Bank Status", pivot.bank))
-        rows_data.append(mk("balance", "Bank Status ohne EU-Förderung", pivot.bank_no_eu))
 
         grid = ui.aggrid({
             "columnDefs": cols, "rowData": rows_data,
@@ -202,8 +210,14 @@ def render() -> None:
             a = e.args or {}
             data = a.get("data") or {}
             col = a.get("colId") or a.get("column") or ""
-            if data.get("kind") == "section" and col == "pos":
+            if col != "pos":
+                return
+            if data.get("kind") == "section":
                 state["collapsed"] ^= {data["pos"]}
+                build()
+            elif data.get("kind") == "group":
+                # rid is "group-<section>/<name>"; the collapse key is the part after "group-".
+                state["collapsed"] ^= {data["rid"][len("group-"):]}
                 build()
 
         grid.on("cellClicked", _toggle)
