@@ -39,7 +39,7 @@ def index() -> None:
 
     # Hidden tab controller drives the panels; the sidebar sets its value.
     with ui.tabs().props("vertical").classes("hidden") as tabs:
-        tab_refs = {key: ui.tab(label, icon=icon) for key, icon, label, _ in _NAV}
+        tab_refs = {key: ui.tab(key) for key, icon, label, _ in _NAV}  # tab name == key
 
     with drawer:
         with ui.list().props("padding").classes("w-full"):
@@ -50,7 +50,18 @@ def index() -> None:
                     with ui.item_section():
                         ui.item_label(label)
 
+    # Pages may return an on-show refresh fn so computed views (GuV, Liquidität)
+    # pick up the latest source data whenever the tab is opened.
+    on_show: dict = {}
     with ui.tab_panels(tabs, value=tab_refs["emp"]).classes("w-full"):
         for key, icon, label, render in _NAV:
             with ui.tab_panel(tab_refs[key]):
-                render()
+                fn = render()
+                if callable(fn):
+                    on_show[key] = fn
+
+    def _on_tab(e) -> None:
+        fn = on_show.get(e.value)
+        if fn:
+            fn()
+    tabs.on_value_change(_on_tab)

@@ -98,3 +98,10 @@ def render() -> None:
 
     table()
     comparison()
+
+    def _on_show() -> None:
+        # GuV reads source rows directly — re-run so it reflects the latest edits.
+        table.refresh()
+        comparison.refresh()
+
+    return _on_show

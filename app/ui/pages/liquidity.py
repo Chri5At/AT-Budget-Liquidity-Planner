@@ -238,3 +238,10 @@ def render() -> None:
     investments_panel()
     ui.button("Aktualisieren", icon="refresh", on_click=build).props("outline").classes("my-2")
     build()
+
+    def _on_show() -> None:
+        # Rebuild the cashflow ledger + view so opening the tab shows current data.
+        investments_panel.refresh()
+        build()
+
+    return _on_show
