@@ -95,3 +95,67 @@ def liquidity_view_for_scenario(session: Session, scenario_id: int) -> list[Buck
     from .cashflow import build_entries
     entries = build_entries(session, scenario_id)
     return liquidity_view(session, entries)
+
+
+@dataclass
+class PivotSection:
+    name: str
+    totals: list[float]                      # per bucket
+    items: list[tuple[str, list[float]]]     # (label, per-bucket values)
+
+
+@dataclass
+class LiquidityPivot:
+    buckets: list[date]
+    labels: list[str]                        # bucket labels (dd.mm.yyyy)
+    sections: list[PivotSection]             # Einzahlungen, Auszahlungen
+    saldo: list[float]
+    bank: list[float]
+    bank_no_eu: list[float]
+
+
+def liquidity_pivot(session: Session, entries=None) -> LiquidityPivot:
+    """Horizontal cash-flow view: buckets as columns, grouped line items as rows
+    (mirrors the Excel liquidity plan). Each section groups entries by memo."""
+    from collections import defaultdict
+    settings = get_settings(session)
+    if entries is None:
+        entries = session.exec(select(CashflowEntry)).all()
+
+    buckets = [b for b in bucket_sequence(settings) if b >= settings.opening_balance_date]
+    bidx = {b: i for i, b in enumerate(buckets)}
+
+    sec: dict[str, dict[str, list[float]]] = {
+        "Einzahlungen": defaultdict(lambda: [0.0] * len(buckets)),
+        "Auszahlungen": defaultdict(lambda: [0.0] * len(buckets)),
+    }
+    for e in entries:
+        i = bidx.get(e.bucket)
+        if i is None:
+            continue
+        section = "Einzahlungen" if e.kind in INFLOW_KINDS else "Auszahlungen"
+        sec[section][e.memo or "(ohne Bezeichnung)"][i] += e.amount
+
+    sections = []
+    for name in ("Einzahlungen", "Auszahlungen"):
+        items = sorted(sec[name].items(), key=lambda kv: -sum(abs(x) for x in kv[1]))
+        totals = [sum(vals[i] for _, vals in items) for i in range(len(buckets))]
+        sections.append(PivotSection(name, totals,
+                                     [(lbl, [round(x) for x in vals]) for lbl, vals in items]))
+
+    rows = liquidity_view(session, entries)
+    by_b = {r.bucket: r for r in rows}
+    saldo, bank, bank_no_eu = [], [], []
+    for b in buckets:
+        r = by_b.get(b)
+        saldo.append(round(r.net) if r else 0)
+        bank.append(round(r.balance) if r else 0)
+        bank_no_eu.append(round(r.balance_no_eu) if r else 0)
+
+    labels = [f"{b.day:02d}.{b.month:02d}.{b.year}" for b in buckets]
+    return LiquidityPivot(buckets, labels, sections, saldo, bank, bank_no_eu)
+
+
+def liquidity_pivot_for_scenario(session: Session, scenario_id: int) -> LiquidityPivot:
+    from .cashflow import build_entries
+    return liquidity_pivot(session, build_entries(session, scenario_id))

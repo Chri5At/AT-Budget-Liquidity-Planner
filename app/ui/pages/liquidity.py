@@ -11,18 +11,37 @@ from nicegui import ui
 from sqlmodel import select
 
 from ...db import get_session
-from ...engine.liquidity import liquidity_view, liquidity_view_for_scenario
+from ...engine.liquidity import (
+    liquidity_pivot,
+    liquidity_view,
+    liquidity_view_for_scenario,
+)
 from ...engine.scenarios import list_scenarios
 from ...models import Investment
 from ...services.recompute import recompute_all
-from ..formatting import eur
+from ..formatting import eur, page_title
+
+# Pivot grid JS: caret for sections, bold for subtotal/balance rows, red for negatives.
+_PIV_NAME = (
+    'params => { var k=params.data.kind, nm=params.data.pos||"";'
+    ' if(k==="section"){var ic=params.data.expanded?"▼":"▶";'
+    '   return "<span style=\'cursor:pointer;font-weight:bold\'>"+ic+" "+nm+"</span>";}'
+    ' if(k==="total"||k==="balance") return "<b>"+nm+"</b>";'
+    ' return "<span style=\'padding-left:14px;color:#374151\'>"+nm+"</span>"; }')
+_PIV_STYLE = (
+    'params => { var k=params.data.kind, s={};'
+    ' if(k==="section"||k==="total") s={fontWeight:"bold",backgroundColor:"#eef2ff"};'
+    ' else if(k==="balance"){ s={fontWeight:"bold"}; if(params.value<0) s.color="#b91c1c"; }'
+    ' return Object.keys(s).length?s:null; }')
 
 
 def render() -> None:
-    ui.label("Liquidität").classes("text-xl font-bold")
-    ui.label("Geldflüsse in 15.-/Monatsende-Buckets. Gehälter: Netto am Monatsende, "
-             "Abgaben am 15. des Folgemonats (Banktag-Anpassung).").classes("text-sm text-gray-500")
+    page_title("Liquidität",
+               "Horizontale Zeitachse: Buckets (15./Monatsende) als Spalten, Positionen als "
+               "Zeilen — gruppiert in Ein-/Auszahlungen (auf-/zuklappbar). Gehälter: Netto am "
+               "Monatsende, Abgaben am 15. des Folgemonats (Banktag-Anpassung).")
 
+    state = {"collapsed": set()}
     container = ui.column().classes("w-full")
 
     def build() -> None:
@@ -30,13 +49,12 @@ def render() -> None:
         recompute_all()
         with get_session() as s:
             scs = list_scenarios(s)
-            rows = liquidity_view(s)                      # base (persisted ledger)
+            rows = liquidity_view(s)
             multi = len(scs) > 1
-            scenario_rows = []
-            if multi:
-                for sc in scs:
-                    r = rows if sc.base_id is None else liquidity_view_for_scenario(s, sc.id)
-                    scenario_rows.append((sc.name, r))
+            scenario_rows = ([(sc.name, rows if sc.base_id is None
+                               else liquidity_view_for_scenario(s, sc.id)) for sc in scs]
+                             if multi else [])
+            pivot = liquidity_pivot(s)
         with container:
             if not rows:
                 ui.label("Keine Daten — bitte zuerst Mitarbeiter/Einnahmen/Ausgaben erfassen.")
@@ -44,7 +62,6 @@ def render() -> None:
 
             labels = [r.label for r in rows]
             if multi:
-                # Overlay one balance curve per scenario for comparison.
                 series = [{"name": nm, "type": "line", "smooth": True,
                            "data": [round(x.balance) for x in r]} for nm, r in scenario_rows]
                 ui.echart({
@@ -60,7 +77,6 @@ def render() -> None:
                         low = min(x.balance for x in r)
                         ui.label(f"{nm}: Tief {eur(low)} · End {eur(r[-1].balance)}").classes(
                             "text-sm font-semibold " + ("text-red-600" if low < 0 else "text-green-700"))
-                ui.label("Detailtabelle: Basis-Szenario").classes("text-xs text-gray-500 mt-2")
             else:
                 bal = [round(r.balance) for r in rows]
                 bal_no_eu = [round(r.balance_no_eu) for r in rows]
@@ -75,6 +91,9 @@ def render() -> None:
                          "data": bal_no_eu, "lineStyle": {"type": "dashed"}},
                     ],
                 }).classes("w-full").style("height: 320px")
+            ui.label("„ohne EU-Förderung“ = derselbe Verlauf ohne die EU-Förder-Einzahlung "
+                     "(kein Szenario). Mehrere Szenarien werden im Diagramm überlagert."
+                     ).classes("text-xs text-gray-500")
 
             low = min(r.balance for r in rows)
             end = rows[-1].balance
@@ -86,37 +105,61 @@ def render() -> None:
                 if sub_total:
                     ui.label(f"Subunternehmer-Auszahlungen: {eur(sub_total)}").classes(
                         "text-sm font-semibold").style("color:#b45309")
+                if multi:
+                    ui.label("Detailtabelle: Basis-Szenario").classes("text-xs text-gray-500")
 
-            col_defs = [
-                {"headerName": "Datum", "field": "label", "pinned": "left", "width": 110},
-                {"headerName": "Einzahlungen", "field": "inflow", "type": "numericColumn", "width": 130,
-                 ":valueFormatter": "p => p.value? Math.round(p.value).toLocaleString('de-DE')+' €':''"},
-                {"headerName": "Auszahlungen", "field": "outflow", "type": "numericColumn", "width": 130,
-                 ":valueFormatter": "p => p.value? Math.round(p.value).toLocaleString('de-DE')+' €':''"},
-                {"headerName": "davon Subunternehmer", "field": "sub", "type": "numericColumn",
-                 "width": 160,
-                 ":cellStyle": "p => p.value ? {color:'#b45309', backgroundColor:'#fff7ed'} : null",
-                 ":valueFormatter": "p => p.value? Math.round(p.value).toLocaleString('de-DE')+' €':''"},
-                {"headerName": "Saldo", "field": "net", "type": "numericColumn", "width": 120,
-                 ":valueFormatter": "p => Math.round(p.value||0).toLocaleString('de-DE')+' €'"},
-                {"headerName": "Bank Status", "field": "balance", "type": "numericColumn", "width": 140,
-                 "cellClass": "font-bold",
-                 ":valueFormatter": "p => Math.round(p.value||0).toLocaleString('de-DE')+' €'",
-                 ":cellClassRules": "{'text-red-600': p => p.value < 0}"},
-                {"headerName": "ohne EU", "field": "balance_no_eu", "type": "numericColumn", "width": 140,
-                 ":valueFormatter": "p => Math.round(p.value||0).toLocaleString('de-DE')+' €'"},
-            ]
-            row_data = [{
-                "label": r.label, "inflow": round(r.inflow), "outflow": round(r.outflow),
-                "sub": round(r.subcontractor), "net": round(r.net), "balance": round(r.balance),
-                "balance_no_eu": round(r.balance_no_eu),
-            } for r in rows]
-            ui.aggrid({
-                "columnDefs": col_defs,
-                "rowData": row_data,
-                "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
-                "rowHeight": 30, "headerHeight": 34,
-            }).classes("w-full").style(f"height: {34 + max(1, len(row_data)) * 30 + 20}px")
+            _render_pivot(pivot)
+
+    def _render_pivot(pivot) -> None:
+        cols = [{"headerName": "Position", "field": "pos", "pinned": "left", "width": 240,
+                 ":cellRenderer": _PIV_NAME}]
+        for i, lab in enumerate(pivot.labels):
+            cols.append({"headerName": lab, "field": f"b{i}", "type": "numericColumn", "width": 88,
+                         ":cellStyle": _PIV_STYLE,
+                         ":valueFormatter": "p=>p.value?Math.round(p.value).toLocaleString('de-DE'):''"})
+        cols.append({"headerName": "Summe", "field": "sum", "pinned": "right", "width": 120,
+                     "type": "numericColumn", "cellClass": "font-bold",
+                     ":valueFormatter": "p=>Math.round(p.value||0).toLocaleString('de-DE')+' €'"})
+
+        rows_data = []
+
+        def mk(kind, pos, vals, expanded=None):
+            total = round(vals[-1]) if kind == "balance" else round(sum(vals))
+            d = {"rid": f"{kind}-{pos}", "kind": kind, "pos": pos, "sum": total}
+            if expanded is not None:
+                d["expanded"] = expanded
+            for i, v in enumerate(vals):
+                d[f"b{i}"] = round(v)
+            return d
+
+        for sec in pivot.sections:
+            expanded = sec.name not in state["collapsed"]
+            rows_data.append(mk("section", sec.name, sec.totals, expanded))
+            if expanded:
+                for label, vals in sec.items:
+                    rows_data.append(mk("item", label, vals))
+        rows_data.append(mk("total", "= Saldo", pivot.saldo))
+        rows_data.append(mk("balance", "Bank Status", pivot.bank))
+        rows_data.append(mk("balance", "Bank Status ohne EU-Förderung", pivot.bank_no_eu))
+
+        grid = ui.aggrid({
+            "columnDefs": cols, "rowData": rows_data,
+            "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True,
+                              "suppressSizeToFit": True},
+            "suppressSizeToFit": True,
+            "rowHeight": 28, "headerHeight": 34,
+            ":getRowId": "params => params.data.rid",
+        }).classes("w-full").style(f"height: {34 + len(rows_data) * 28 + 22}px")
+
+        def _toggle(e) -> None:
+            a = e.args or {}
+            data = a.get("data") or {}
+            col = a.get("colId") or a.get("column") or ""
+            if data.get("kind") == "section" and col == "pos":
+                state["collapsed"] ^= {data["pos"]}
+                build()
+
+        grid.on("cellClicked", _toggle)
 
     @ui.refreshable
     def investments_panel() -> None:
