@@ -222,20 +222,22 @@ def render() -> None:
                           "!params.data['detail'+params.colDef.field.substring(1)]")
         col_defs = [
             {"headerName": "", "width": 38, "pinned": "left", "sortable": False,
-             "resizable": False, "suppressMenu": True, ":valueGetter": "() => ''",
+             "resizable": False, "suppressMenu": True, "suppressSizeToFit": True,
+             ":valueGetter": "() => ''",
              ":rowDrag": "params => params.data.kind !== 'direct'"},
             {"headerName": "Ausgabe / Kategorie", "field": "name", "pinned": "left", "width": 230,
-             ":editable": editable, ":cellRenderer": _NAME_RENDER},
-            {"headerName": "Bereich", "field": "bereich", "width": 150},
+             "suppressSizeToFit": True, ":editable": editable, ":cellRenderer": _NAME_RENDER},
+            {"headerName": "Bereich", "field": "bereich", "width": 150, "suppressSizeToFit": True},
         ]
         for m in range(1, 13):
             col_defs.append({"headerName": MONTHS_DE[m - 1], "field": f"m{m}", "width": 92,
-                             "type": "numericColumn", ":editable": editable_month,
+                             "minWidth": 64, "type": "numericColumn", ":editable": editable_month,
                              ":valueParser": _CELL_PARSER, ":cellStyle": _CELL_STYLE,
                              ":cellRenderer": _CELL_RENDER})
         year_getter = "params => " + "+".join(f"(Number(params.data.m{m})||0)" for m in range(1, 13))
         col_defs.append({"headerName": "Jahr", "field": "jahr", "pinned": "right", "width": 110,
-                         "type": "numericColumn", "cellClass": "font-bold", ":valueGetter": year_getter,
+                         "type": "numericColumn", "cellClass": "font-bold", "suppressSizeToFit": True,
+                         ":valueGetter": year_getter,
                          ":valueFormatter": "p=>Math.round(p.value||0).toLocaleString('de-DE')+' €'"})
         bottom = {"rid": "grandtotal", "kind": "grandtotal", "name": "Σ Gesamt / Monat"}
         for m in range(1, 13):
@@ -246,7 +248,9 @@ def render() -> None:
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
             "rowDragManaged": True, "animateRows": True, "rowHeight": 30, "headerHeight": 34,
-            ":getRowId": "params => params.data.rid", ":getRowStyle": _ROW_STYLE,
+            ":getRowId": "params => params.data.rid",
+            ":onGridSizeChanged": "params => params.api.sizeColumnsToFit()",
+            ":getRowStyle": _ROW_STYLE,
         }).classes("w-full").style(f"height: {34 + (max(1, len(rows)) + 1) * 30 + 20}px")
         state["grid"] = grid
         grid.on("cellValueChanged", _on_cell_edit)

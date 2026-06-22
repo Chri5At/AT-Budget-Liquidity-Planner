@@ -12,7 +12,6 @@ from ...db import get_session
 from ...engine.pnl import pnl_view
 from ...engine.scenarios import list_scenarios
 from ...models import Depreciation
-from ...services.recompute import recompute_all
 from ..components.scenario_ui import scenario_select
 from ..formatting import MONTHS_DE, YEARS, eur
 
@@ -69,6 +68,7 @@ def render() -> None:
         ui.aggrid({
             "columnDefs": col_defs, "rowData": row_data,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
+            ":onGridSizeChanged": "params => params.api.sizeColumnsToFit()",
             "rowHeight": 30, "headerHeight": 34,
         }).classes("w-full max-w-4xl").style(f"height: {34 + max(1, len(row_data)) * 30 + 20}px")
 
@@ -80,16 +80,17 @@ def render() -> None:
         editable_month = "params => !!params.data._editable_key"
         editable_style = ("params => params.data._editable_key "
                           "? {backgroundColor:'#fffbeb', cursor:'pointer'} : null")
-        col_defs = [{"headerName": "Position", "field": "label", "pinned": "left", "width": 270}]
+        col_defs = [{"headerName": "Position", "field": "label", "pinned": "left", "width": 270,
+                     "suppressSizeToFit": True}]
         for m in range(1, 13):
             col_defs.append({"headerName": MONTHS_DE[m - 1], "field": f"m{m}",
-                             "type": "numericColumn", "width": 90, ":editable": editable_month,
-                             ":cellStyle": editable_style,
+                             "type": "numericColumn", "width": 90, "minWidth": 70,
+                             ":editable": editable_month, ":cellStyle": editable_style,
                              ":valueParser": "p => (p.newValue===''||p.newValue==null)?0:Number(p.newValue)",
                              ":valueFormatter":
                              "p => (p.value? Math.round(p.value).toLocaleString('de-DE'):'')"})
         col_defs.append({"headerName": "Gesamt", "field": "jahr", "pinned": "right", "width": 130,
-                         "type": "numericColumn", "cellClass": "font-bold",
+                         "type": "numericColumn", "cellClass": "font-bold", "suppressSizeToFit": True,
                          ":valueFormatter":
                          "p => p.value? Math.round(p.value).toLocaleString('de-DE')+' €':''"})
 
@@ -107,20 +108,44 @@ def render() -> None:
             "rowData": row_data,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
+            ":getRowId": "params => params.data.label",
+            ":onGridSizeChanged": "params => params.api.sizeColumnsToFit()",
             ":rowClassRules": "{'font-bold bg-blue-50': p => p.data._kind === 'subtotal',"
                               " 'font-semibold': p => p.data._kind === 'section'}",
         }).classes("w-full").style("height: calc(100vh - 300px); min-height: 360px")
+        state["grid"] = grid
         grid.on("cellValueChanged", _on_edit)
 
     def _on_edit(e) -> None:
         a = e.args or {}
         data = a.get("data") or {}
         col = a.get("colId") or a.get("column") or ""
-        if data.get("_editable_key") == "depreciation" and isinstance(col, str) \
-                and col.startswith("m") and col[1:].isdigit():
-            _save_depreciation(state["year"], int(col[1:]), data.get(col, 0))
-            recompute_all()
-            table.refresh()
+        if not (data.get("_editable_key") == "depreciation" and isinstance(col, str)
+                and col.startswith("m") and col[1:].isdigit()):
+            return
+        month = int(col[1:])
+        _save_depreciation(state["year"], month, data.get(col, 0))
+        # Depreciation is non-cash (not in the cashflow ledger), so no recompute_all().
+        # Surgically update only the affected rows so focus stays for fast editing.
+        grid = state.get("grid")
+        if grid is None:
+            return
+        with get_session() as s:
+            rows = pnl_view(s, state["year"], state["scenario"])
+
+        def find(pred):
+            return next((r for r in rows if pred(r.label)), None)
+
+        # Editing depreciation changes Abschreibungen, EBIT and EBT (NB: "= EBIT" is a
+        # substring of "= EBITDA", so match EBIT/EBT precisely).
+        affected = (find(lambda lab: "Abschreibungen" in lab),
+                    find(lambda lab: "EBIT" in lab and "EBITDA" not in lab),
+                    find(lambda lab: "EBT" in lab))
+        for row in affected:
+            if row is None:
+                continue
+            grid.run_row_method(row.label, "setDataValue", f"m{month}", round(row.values[month - 1]))
+            grid.run_row_method(row.label, "setDataValue", "jahr", round(row.annual))
 
     def _change_year(value: int) -> None:
         state["year"] = int(value)

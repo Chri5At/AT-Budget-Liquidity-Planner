@@ -18,9 +18,16 @@ from ...engine.liquidity import (
     liquidity_view,
 )
 from ...engine.scenarios import list_scenarios
-from ...models import Investment
+from ...models import Investment, Loan, LoanKind, LoanSchedule
 from ...services.recompute import recompute_all
 from ..formatting import eur, page_title
+
+_LOAN_KIND_DE = {
+    LoanKind.EU_FUNDING: "EU-Förderung / Zuschuss",
+    LoanKind.BANK_LOAN: "Bankdarlehen",
+    LoanKind.OWNER_LOAN: "Gesellschafterdarlehen",
+    LoanKind.GF_LOAN: "GF-Darlehen",
+}
 
 _PRESETS = {"all": "Gesamter Zeitraum", "this_year": "Dieses Jahr", "next_year": "Nächstes Jahr",
             "this_q": "Dieses Quartal", "next_q": "Nächstes Quartal", "custom": "Benutzerdefiniert"}
@@ -253,8 +260,115 @@ def render() -> None:
             ui.button("Investment hinzufügen", icon="add",
                       on_click=_add_investment_dialog).classes("mt-2")
 
+    @ui.refreshable
+    def loans_panel() -> None:
+        with get_session() as s:
+            loans = s.exec(select(Loan).order_by(Loan.disbursement_date, Loan.id)).all()
+            rows = [(lo.id, lo.name, lo.kind, lo.principal,
+                     lo.disbursement_date.isoformat() if lo.disbursement_date else "")
+                    for lo in loans]
+            total = sum(lo.principal for lo in loans)
+        with ui.card().classes("w-full"):
+            with ui.row().classes("items-center justify-between w-full"):
+                ui.label("Darlehen & Förderungen").classes("text-base font-semibold")
+                ui.label(f"Summe Auszahlungen: {eur(total)}").classes(
+                    "text-sm font-semibold text-green-700")
+            ui.label("Die Auszahlung (Principal) fließt am Datum als Einzahlung in die Liquidität "
+                     "(EU-Förderung als „Förderung“). Zinsen/Tilgung wirken separat — Zinsen auch "
+                     "in der GuV.").classes("text-xs text-gray-500")
+            if rows:
+                with ui.row().classes("items-center gap-2 text-xs text-gray-500 font-medium mt-1"):
+                    ui.label("Bezeichnung").classes("w-48")
+                    ui.label("Art").classes("w-44")
+                    ui.label("Betrag (€)").classes("w-32")
+                    ui.label("Auszahlung").classes("w-40")
+                for lid, name, kind, principal, dstr in rows:
+                    with ui.row().classes("items-center gap-2"):
+                        ui.input("Bezeichnung", value=name,
+                                 on_change=lambda e, lid=lid: _save_loan_field(lid, name=e.value)
+                                 ).props("dense outlined").classes("w-48")
+                        ui.select(_LOAN_KIND_DE, value=kind,
+                                  on_change=lambda e, lid=lid: _save_loan_field(lid, kind=LoanKind(e.value))
+                                  ).props("dense outlined").classes("w-44")
+                        ui.number("Betrag", value=round(principal), step=1000, min=0,
+                                  on_change=lambda e, lid=lid: _save_loan_field(lid, principal=float(e.value or 0))
+                                  ).props("dense outlined").classes("w-32")
+                        ui.input("YYYY-MM-DD", value=dstr,
+                                 on_change=lambda e, lid=lid: _save_loan_field(lid, disbursement_date=e.value)
+                                 ).props("dense outlined").classes("w-40")
+                        ui.button(icon="delete", on_click=lambda lid=lid: _delete_loan(lid)
+                                  ).props("flat round dense color=negative").tooltip("löschen")
+            else:
+                ui.label("Noch keine Darlehen/Förderungen erfasst.").classes(
+                    "text-sm text-gray-500 mt-1")
+            ui.button("Darlehen / Förderung hinzufügen", icon="add",
+                      on_click=_add_loan_dialog).classes("mt-2")
+
+    def _save_loan_field(lid: int, **kw) -> None:
+        with get_session() as s:
+            lo = s.get(Loan, lid)
+            if lo is None:
+                return
+            if "kind" in kw:
+                lo.is_eu_funding = kw["kind"] == LoanKind.EU_FUNDING
+            if "disbursement_date" in kw:
+                v = kw.pop("disbursement_date")
+                try:
+                    lo.disbursement_date = date.fromisoformat(v) if v else None
+                except ValueError:
+                    ui.notify("Datum: YYYY-MM-DD", type="warning")
+                    return
+            for k, v in kw.items():
+                setattr(lo, k, v)
+            s.add(lo)
+            s.commit()
+        build()   # the inflow/curve changes — refresh the table without touching this panel
+
+    def _delete_loan(lid: int) -> None:
+        with get_session() as s:
+            for sch in s.exec(select(LoanSchedule).where(LoanSchedule.loan_id == lid)).all():
+                s.delete(sch)
+            lo = s.get(Loan, lid)
+            if lo is not None:
+                s.delete(lo)
+            s.commit()
+        ui.notify("Darlehen/Förderung gelöscht", type="positive")
+        loans_panel.refresh()
+        build()
+
+    def _add_loan_dialog() -> None:
+        with ui.dialog() as dlg, ui.card():
+            ui.label("Neues Darlehen / Förderung").classes("text-lg font-bold")
+            name = ui.input("Bezeichnung", value="Förderung").classes("w-72")
+            kind = ui.select(_LOAN_KIND_DE, value=LoanKind.EU_FUNDING, label="Art").classes("w-72")
+            amount = ui.number("Betrag / Auszahlung (€)", value=0, step=1000, min=0).classes("w-48")
+            d = ui.input("Auszahlung (YYYY-MM-DD)", value=date.today().isoformat()).classes("w-48")
+            with ui.row():
+                ui.button("Abbrechen", on_click=dlg.close).props("flat")
+
+                def _create() -> None:
+                    try:
+                        dd = date.fromisoformat(d.value) if d.value else None
+                    except ValueError:
+                        ui.notify("Datum: YYYY-MM-DD", type="warning")
+                        return
+                    k = LoanKind(kind.value)
+                    with get_session() as s:
+                        s.add(Loan(name=name.value or "Förderung", kind=k,
+                                   principal=float(amount.value or 0), disbursement_date=dd,
+                                   is_eu_funding=(k == LoanKind.EU_FUNDING)))
+                        s.commit()
+                    dlg.close()
+                    ui.notify("Darlehen/Förderung hinzugefügt", type="positive")
+                    loans_panel.refresh()
+                    build()
+
+                ui.button("Speichern", icon="save", on_click=_create)
+        dlg.open()
+
     def _refresh_all() -> None:
         investments_panel.refresh()
+        loans_panel.refresh()
         build()
 
     def _add_investment_dialog() -> None:
@@ -301,10 +415,12 @@ def render() -> None:
     build()
     ui.separator().classes("my-3")
     investments_panel()
+    loans_panel()
 
     def _on_show() -> None:
         # Rebuild the cashflow ledger + view so opening the tab shows current data.
         investments_panel.refresh()
+        loans_panel.refresh()
         build()
 
     return _on_show

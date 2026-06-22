@@ -293,21 +293,24 @@ def render() -> None:
                           "!params.data['detail'+params.colDef.field.substring(1)]")
         col_defs = [
             {"headerName": "", "width": 38, "pinned": "left", "sortable": False,
-             "resizable": False, "suppressMenu": True, ":valueGetter": "() => ''",
+             "resizable": False, "suppressMenu": True, "suppressSizeToFit": True,
+             ":valueGetter": "() => ''",
              # Drag everything except the synthetic "direct" row (it belongs to its category).
              ":rowDrag": "params => params.data.kind !== 'direct'"},
-            {"headerName": "Einnahmequelle / Kategorie", "field": "name",
+            {"headerName": "Einnahmequelle / Kategorie", "field": "name", "suppressSizeToFit": True,
              "pinned": "left", "width": 240, ":editable": editable, ":cellRenderer": _NAME_RENDER},
-            {"headerName": "Typ", "field": "typ", "width": 150},
+            {"headerName": "Typ", "field": "typ", "width": 150, "suppressSizeToFit": True},
         ]
         for m in range(1, 13):
             col_defs.append({"headerName": MONTHS_DE[m - 1], "field": f"m{m}",
-                             "width": 96, "type": "numericColumn", ":editable": editable_month,
+                             "width": 96, "minWidth": 64, "type": "numericColumn",
+                             ":editable": editable_month,
                              ":valueParser": _CELL_PARSER, ":cellStyle": _CELL_STYLE,
                              ":cellRenderer": _CELL_RENDER})
         year_getter = "params => " + "+".join(f"(Number(params.data.m{m})||0)" for m in range(1, 13))
         col_defs.append({"headerName": "Jahr", "field": "jahr", "pinned": "right", "width": 110,
-                         "type": "numericColumn", "cellClass": "font-bold", ":valueGetter": year_getter,
+                         "type": "numericColumn", "cellClass": "font-bold", "suppressSizeToFit": True,
+                         ":valueGetter": year_getter,
                          ":valueFormatter": "p=>Math.round(p.value||0).toLocaleString('de-DE')+' €'"})
         # Pinned bottom row: total per month across top-level rows (categories
         # already include their children; leaves count once).
@@ -321,6 +324,7 @@ def render() -> None:
             "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
             "rowDragManaged": True, "animateRows": True, "rowHeight": 30, "headerHeight": 34,
             ":getRowId": "params => params.data.rid",
+            ":onGridSizeChanged": "params => params.api.sizeColumnsToFit()",
             ":getRowStyle": _ROW_STYLE,
         }).classes("w-full").style(f"height: {34 + (max(1, len(rows)) + 1) * 30 + 20}px")
         state["grid"] = grid
