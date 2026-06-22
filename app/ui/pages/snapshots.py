@@ -16,7 +16,15 @@ from ...services.snapshots import (
     restore_snapshot,
     snapshot_kpis,
 )
-from ..formatting import YEARS, eur
+from ..formatting import MONTHS_DE, YEARS, eur
+
+# (year, month) range options for the scenario export, e.g. "2026-07" -> "Jul 2026".
+_PERIOD_OPTS = {f"{y}-{m:02d}": f"{MONTHS_DE[m - 1]} {y}" for y in YEARS for m in range(1, 13)}
+
+
+def _parse_ym(s: str) -> tuple[int, int]:
+    y, m = s.split("-")
+    return int(y), int(m)
 
 
 def _safe(name: str) -> str:
@@ -34,16 +42,19 @@ def render() -> None:
         ui.button("Snapshot erstellen", icon="photo_camera", on_click=lambda: _create_dialog())
 
     # --- Excel export ----------------------------------------------------------
-    exp = {"scenario": 1, "year": YEARS[0]}
+    exp = {"scenario": 1, "year": YEARS[0],
+           "start": f"{YEARS[0]}-01", "end": f"{YEARS[-1]}-12"}
 
     def _export_scenario() -> None:
+        start, end = _parse_ym(exp["start"]), _parse_ym(exp["end"])
         with get_session() as s:
             scs = {sc.id: sc.name for sc in list_scenarios(s)}
-            data = export_single_scenario(s, exp["scenario"])
+            data = export_single_scenario(s, exp["scenario"], start, end)
         name = scs.get(exp["scenario"], "Szenario")
-        fn = f"Budget_Liquiditaet_{_safe(name)}_{datetime.now():%Y-%m-%d}.xlsx"
+        fn = (f"Budget_Liquiditaet_{_safe(name)}_{exp['start']}_bis_{exp['end']}"
+              f"_{datetime.now():%Y-%m-%d}.xlsx")
         ui.download.content(data, fn)
-        ui.notify(f"Export {name} erstellt", type="positive")
+        ui.notify(f"Export {name} ({exp['start']}–{exp['end']}) erstellt", type="positive")
 
     def _export_comparison() -> None:
         with get_session() as s:
@@ -54,13 +65,20 @@ def render() -> None:
     with ui.card().classes("w-full max-w-4xl"):
         ui.label("Excel-Export").classes("text-base font-semibold")
         ui.label("Ein Dokument je Szenario (Budget, Liquidität, Personal, Einnahmen, Ausgaben) "
-                 "oder ein Szenarienvergleich mit Diagrammen.").classes("text-xs text-gray-500")
-        with ui.row().classes("items-center gap-3 mt-1"):
+                 "oder ein Szenarienvergleich mit Diagrammen. Der Zeitraum (Von/Bis) begrenzt "
+                 "den Szenario-Export.").classes("text-xs text-gray-500")
+        with ui.row().classes("items-center gap-3 mt-1 flex-wrap"):
             with get_session() as s:
                 sc_opts = {sc.id: sc.name for sc in list_scenarios(s)}
             ui.select(sc_opts, value=exp["scenario"], label="Szenario",
                       on_change=lambda e: exp.update(scenario=int(e.value))
-                      ).props("dense outlined").classes("w-48")
+                      ).props("dense outlined").classes("w-44")
+            ui.select(_PERIOD_OPTS, value=exp["start"], label="Von",
+                      on_change=lambda e: exp.update(start=e.value)
+                      ).props("dense outlined").classes("w-36")
+            ui.select(_PERIOD_OPTS, value=exp["end"], label="Bis",
+                      on_change=lambda e: exp.update(end=e.value)
+                      ).props("dense outlined").classes("w-36")
             ui.button("Szenario exportieren", icon="download", on_click=_export_scenario)
             ui.separator().props("vertical")
             ui.select(YEARS, value=exp["year"], label="Jahr (Vergleich)",

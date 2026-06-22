@@ -60,8 +60,21 @@ def _autosize(ws, widths: dict[int, int]) -> None:
         ws.column_dimensions[get_column_letter(col)].width = w
 
 
-def _month_headers() -> list[str]:
-    return ["Position", *MONTHS_DE, "Jahr"]
+def _month_headers(months: list[int]) -> list[str]:
+    total = "Jahr" if len(months) == 12 else "Summe"
+    return ["Position", *[MONTHS_DE[m - 1] for m in months], total]
+
+
+def _year_months(start: tuple[int, int], end: tuple[int, int]) -> dict[int, list[int]]:
+    """Ordered {year: [months]} for the inclusive (year, month) range."""
+    out: dict[int, list[int]] = {}
+    y, m = start
+    while (y, m) <= end:
+        out.setdefault(y, []).append(m)
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return out
 
 
 # --- data helpers ----------------------------------------------------------------
@@ -117,36 +130,43 @@ def _personnel_rows(session: Session, year: int):
 
 # --- sheet builders --------------------------------------------------------------
 
-def _sheet_budget(ws, session: Session, scenario_id: int, stamp: str, sc_name: str) -> None:
+def _sheet_budget(ws, session: Session, scenario_id: int, stamp: str, sc_name: str,
+                  year_months: dict[int, list[int]]) -> None:
     _title(ws, "GuV / Budget (Deckungsbeitragsrechnung)",
            f"Szenario: {sc_name} · Erstellt: {stamp}")
     row = 4
-    for year in YEARS:
+    for year, months in year_months.items():
+        last = 2 + len(months)
         ws.cell(row=row, column=1, value=f"Jahr {year}").font = _BOLD
         row += 1
-        _header_row(ws, row, _month_headers())
+        _header_row(ws, row, _month_headers(months))
         row += 1
         for pr in pnl_view(session, year, scenario_id):
             ws.cell(row=row, column=1, value=pr.label.strip())
-            for m in range(12):
-                c = ws.cell(row=row, column=2 + m, value=round(pr.values[m]))
+            for i, m in enumerate(months):
+                c = ws.cell(row=row, column=2 + i, value=round(pr.values[m - 1]))
                 c.number_format = _EUR
-            jc = ws.cell(row=row, column=14, value=round(pr.annual))
+            jc = ws.cell(row=row, column=last, value=round(sum(pr.values[m - 1] for m in months)))
             jc.number_format = _EUR
             if pr.kind == "subtotal":
-                for col in range(1, 15):
+                for col in range(1, last + 1):
                     ws.cell(row=row, column=col).font = _BOLD
             row += 1
         row += 2
     _autosize(ws, {1: 32, **{c: 12 for c in range(2, 14)}, 14: 14})
 
 
-def _sheet_liquidity(ws, session: Session, scenario_id: int, stamp: str, sc_name: str) -> None:
+def _sheet_liquidity(ws, session: Session, scenario_id: int, stamp: str, sc_name: str,
+                     start_date=None, end_date=None) -> None:
     _title(ws, "Liquidität", f"Szenario: {sc_name} · Erstellt: {stamp}")
     headers = ["Datum", "Einzahlungen", "Auszahlungen", "davon Subunternehmer",
                "Saldo", "Bank Status", "ohne EU-Förderung"]
     _header_row(ws, 4, headers)
     rows = liquidity_view_for_scenario(session, scenario_id)
+    if start_date or end_date:
+        rows = [br for br in rows
+                if (start_date is None or br.bucket >= start_date)
+                and (end_date is None or br.bucket <= end_date)]
     r = 5
     for br in rows:
         ws.cell(row=r, column=1, value=br.label)
@@ -169,55 +189,78 @@ def _sheet_liquidity(ws, session: Session, scenario_id: int, stamp: str, sc_name
         ws.add_chart(chart, f"I4")
 
 
-def _sheet_personal(ws, session: Session, stamp: str, sc_name: str) -> None:
+def _sheet_personal(ws, session: Session, stamp: str, sc_name: str,
+                    year_months: dict[int, list[int]]) -> None:
     _title(ws, "Personal", f"Erstellt: {stamp}")
     row = 4
-    for year in YEARS:
+    for year, months in year_months.items():
+        last = 2 + len(months)
         ws.cell(row=row, column=1, value=f"Jahr {year}").font = _BOLD
         row += 1
-        _header_row(ws, row, _month_headers())
+        _header_row(ws, row, _month_headers(months))
         row += 1
-        for name, gross, net, allin in _personnel_rows(session, year):
+        emps = _personnel_rows(session, year)
+        sums = {0: [0.0] * 12, 1: [0.0] * 12, 2: [0.0] * 12}  # gross / net / all-in
+        for name, gross, net, allin in emps:
             ws.cell(row=row, column=1, value=name).font = _BOLD
             row += 1
-            for label, arr in (("  Brutto", gross), ("  Netto", net),
-                               ("  Gesamtkosten (Brutto+LNK)", allin)):
+            for idx, (label, arr) in enumerate((("  Brutto", gross), ("  Netto", net),
+                                                ("  Gesamtkosten (Brutto+LNK)", allin))):
                 ws.cell(row=row, column=1, value=label)
-                for m in range(12):
-                    c = ws.cell(row=row, column=2 + m, value=round(arr[m]))
+                for i, m in enumerate(months):
+                    c = ws.cell(row=row, column=2 + i, value=round(arr[m - 1]))
                     c.number_format = _EUR
-                jc = ws.cell(row=row, column=14, value=round(sum(arr)))
+                    sums[idx][m - 1] += arr[m - 1]
+                jc = ws.cell(row=row, column=last, value=round(sum(arr[m - 1] for m in months)))
                 jc.number_format = _EUR
                 row += 1
+        # Summary across all employees.
+        if emps:
+            ws.cell(row=row, column=1, value="Summe alle Mitarbeiter").font = _BOLD
+            row += 1
+            for idx, label in ((0, "  Brutto gesamt"), (1, "  Netto gesamt"),
+                               (2, "  Gesamtkosten gesamt (Brutto+LNK)")):
+                lc = ws.cell(row=row, column=1, value=label)
+                lc.font = _BOLD
+                for i, m in enumerate(months):
+                    c = ws.cell(row=row, column=2 + i, value=round(sums[idx][m - 1]))
+                    c.number_format = _EUR
+                    c.font = _BOLD
+                jc = ws.cell(row=row, column=last,
+                             value=round(sum(sums[idx][m - 1] for m in months)))
+                jc.number_format = _EUR
+                jc.font = _BOLD
+                row += 1
         row += 2
-    _autosize(ws, {1: 28, **{c: 12 for c in range(2, 14)}, 14: 14})
+    _autosize(ws, {1: 32, **{c: 12 for c in range(2, 14)}, 14: 14})
 
 
 def _sheet_matrix(ws, title: str, stamp: str, sc_name: str, session: Session,
-                  data_fn, scenario) -> None:
+                  data_fn, scenario, year_months: dict[int, list[int]]) -> None:
     _title(ws, title, f"Szenario: {sc_name} · Erstellt: {stamp}")
     row = 4
-    for year in YEARS:
+    for year, months in year_months.items():
+        last = 2 + len(months)
         ws.cell(row=row, column=1, value=f"Jahr {year}").font = _BOLD
         row += 1
-        _header_row(ws, row, _month_headers())
+        _header_row(ws, row, _month_headers(months))
         row += 1
         total = [0] * 12
         for name, vals in data_fn(session, scenario, year):
             ws.cell(row=row, column=1, value=name)
-            for m in range(12):
-                c = ws.cell(row=row, column=2 + m, value=vals[m])
+            for i, m in enumerate(months):
+                c = ws.cell(row=row, column=2 + i, value=vals[m - 1])
                 c.number_format = _EUR
-                total[m] += vals[m]
-            jc = ws.cell(row=row, column=14, value=sum(vals))
+                total[m - 1] += vals[m - 1]
+            jc = ws.cell(row=row, column=last, value=sum(vals[m - 1] for m in months))
             jc.number_format = _EUR
             row += 1
         ws.cell(row=row, column=1, value="Summe").font = _BOLD
-        for m in range(12):
-            c = ws.cell(row=row, column=2 + m, value=total[m])
+        for i, m in enumerate(months):
+            c = ws.cell(row=row, column=2 + i, value=total[m - 1])
             c.number_format = _EUR
             c.font = _BOLD
-        c = ws.cell(row=row, column=14, value=sum(total))
+        c = ws.cell(row=row, column=last, value=sum(total[m - 1] for m in months))
         c.number_format = _EUR
         c.font = _BOLD
         row += 3
@@ -226,23 +269,40 @@ def _sheet_matrix(ws, title: str, stamp: str, sc_name: str, session: Session,
 
 # --- public API ------------------------------------------------------------------
 
-def export_single_scenario(session: Session, scenario_id: int = 1) -> bytes:
+def export_single_scenario(session: Session, scenario_id: int = 1,
+                           start: tuple[int, int] | None = None,
+                           end: tuple[int, int] | None = None) -> bytes:
+    """Export one scenario. `start`/`end` are (year, month) bounds (inclusive);
+    default is the full horizon (all configured years)."""
+    from calendar import monthrange
+    from datetime import date
+
     settings = get_settings(session)
     scenario = get_scenario(session, scenario_id)
     stamp = datetime.now().strftime("%d.%m.%Y %H:%M")
     company = settings.company_name
+
+    start = start or (YEARS[0], 1)
+    end = end or (YEARS[-1], 12)
+    if end < start:
+        start, end = end, start
+    ym = _year_months(start, end)
+    start_date = date(start[0], start[1], 1)
+    end_date = date(end[0], end[1], monthrange(end[0], end[1])[1])
+
     wb = Workbook()
     wb.properties.title = f"Budget & Liquidität — {company} — {scenario.name}"
 
     ws = wb.active
     ws.title = "Budget"
-    _sheet_budget(ws, session, scenario_id, stamp, scenario.name)
-    _sheet_liquidity(wb.create_sheet("Liquidität"), session, scenario_id, stamp, scenario.name)
-    _sheet_personal(wb.create_sheet("Personal"), session, stamp, scenario.name)
+    _sheet_budget(ws, session, scenario_id, stamp, scenario.name, ym)
+    _sheet_liquidity(wb.create_sheet("Liquidität"), session, scenario_id, stamp,
+                     scenario.name, start_date, end_date)
+    _sheet_personal(wb.create_sheet("Personal"), session, stamp, scenario.name, ym)
     _sheet_matrix(wb.create_sheet("Einnahmen"), "Einnahmen", stamp, scenario.name,
-                  session, _revenue_matrix, scenario)
+                  session, _revenue_matrix, scenario, ym)
     _sheet_matrix(wb.create_sheet("Ausgaben"), "Ausgaben", stamp, scenario.name,
-                  session, _cost_matrix, scenario)
+                  session, _cost_matrix, scenario, ym)
 
     buf = io.BytesIO()
     wb.save(buf)
