@@ -6,7 +6,14 @@ from nicegui import ui
 MONTHS_DE = ["Jän", "Feb", "Mär", "Apr", "Mai", "Jun",
              "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
 
-YEARS = [2026, 2027]
+
+def years() -> list[int]:
+    """Planning years derived from the configured horizon (Settings → Planungsbeginn/
+    -ende). Extend the horizon end year in Settings to add e.g. 2028 everywhere."""
+    from ..db import get_session, get_settings
+    with get_session() as s:
+        st = get_settings(s)
+    return list(range(st.horizon_start.year, st.horizon_end.year + 1))
 
 
 def page_title(title: str, description: str) -> None:

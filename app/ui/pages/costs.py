@@ -21,7 +21,7 @@ from ...models import (
 )
 from ...models.enums import PNL_LINE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
-from ..formatting import MONTHS_DE, YEARS, eur, page_title
+from ..formatting import MONTHS_DE, eur, page_title, years
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 
 CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
@@ -213,14 +213,14 @@ def _load_tree_rows(year: int, scenario_id: int, collapsed: set) -> list[dict]:
 
 
 def render() -> None:
-    state = {"year": YEARS[0], "scenario": 1, "collapsed": set()}
+    state = {"year": years()[0], "scenario": 1, "collapsed": set()}
 
     page_title("Ausgaben",
                "Aufwände je Kategorie und Monat. Kategorien gruppieren Positionen; die "
                "Kategoriezeile zeigt die Summe. Die Bereich-Zuordnung steuert die GuV.")
 
     with ui.row().classes("items-center gap-3 my-2"):
-        ui.select(YEARS, value=state["year"], label="Jahr",
+        ui.select(years(), value=state["year"], label="Jahr",
                   on_change=lambda e: _change_year(e.value)).props("outlined dense").classes("w-28")
         scenario_select(state["scenario"], lambda v: _change_scenario(v))
         ui.button("Ausgabe hinzufügen", icon="add", on_click=lambda: _add_dialog(False))

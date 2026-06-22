@@ -32,7 +32,7 @@ from ..models import (
     RevenueStream,
     SalaryMonth,
 )
-from ..ui.formatting import MONTHS_DE, YEARS
+from ..ui.formatting import MONTHS_DE, years
 
 _HEAD = Font(bold=True, color="FFFFFF")
 _HEAD_FILL = PatternFill("solid", fgColor="2563EB")
@@ -393,8 +393,8 @@ def export_single_scenario(session: Session, scenario_id: int = 1,
     stamp = datetime.now().strftime("%d.%m.%Y %H:%M")
     company = settings.company_name
 
-    start = start or (YEARS[0], 1)
-    end = end or (YEARS[-1], 12)
+    start = start or (years()[0], 1)
+    end = end or (years()[-1], 12)
     if end < start:
         start, end = end, start
     ym = _year_months(start, end)

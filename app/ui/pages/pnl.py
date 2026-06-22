@@ -13,7 +13,7 @@ from ...engine.pnl import pnl_view
 from ...engine.scenarios import list_scenarios
 from ...models import Depreciation
 from ..components.scenario_ui import scenario_select
-from ..formatting import MONTHS_DE, YEARS, eur
+from ..formatting import MONTHS_DE, eur, years
 
 
 def _save_depreciation(year: int, month: int, amount) -> None:
@@ -29,7 +29,7 @@ def _save_depreciation(year: int, month: int, amount) -> None:
 
 
 def render() -> None:
-    state = {"year": YEARS[0], "scenario": 1}
+    state = {"year": years()[0], "scenario": 1}
 
     ui.label("GuV / Budget (Deckungsbeitragsrechnung)").classes("text-xl font-bold")
     ui.label("Automatisch aus Einnahmen, Ausgaben und Mitarbeitern berechnet. Hellgelbe Zellen "
@@ -37,7 +37,7 @@ def render() -> None:
              ).classes("text-sm text-gray-500")
 
     with ui.row().classes("items-center gap-3 my-2"):
-        ui.select(YEARS, value=state["year"], label="Jahr",
+        ui.select(years(), value=state["year"], label="Jahr",
                   on_change=lambda e: _change_year(e.value)).props("outlined dense").classes("w-28")
         scenario_select(state["scenario"], lambda v: _change_scenario(v))
 

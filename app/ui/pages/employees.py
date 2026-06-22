@@ -11,7 +11,7 @@ from ...models import Employee, PaymentTerm, SalaryMonth, SplitModel
 from ...models.enums import PAYMENT_TERM_DE, SPLIT_MODEL_DE
 from ...engine.payroll_at import employee_year_cost, ruleset_for_year
 from ...services.recompute import recompute_all
-from ..formatting import MONTHS_DE, YEARS, eur, page_title
+from ..formatting import MONTHS_DE, eur, page_title, years
 from ..components.month_grid import editable_month_grid
 
 SONDER_MONTHS = (6, 11)
@@ -99,7 +99,7 @@ def _save_row(year: int, data: dict) -> None:
 
 
 def render() -> None:
-    state = {"year": YEARS[0]}
+    state = {"year": years()[0]}
 
     page_title("Mitarbeiter & Personalkosten",
                "Laufendes Bruttogehalt je Monat eingeben. Sonderzahlungen (13./14., Urlaubs-/"
@@ -107,7 +107,7 @@ def render() -> None:
                "bei unterjährigem Eintritt). Netto wird nach österreichischem Tarif berechnet.")
 
     with ui.row().classes("items-center gap-3 my-2"):
-        ui.select(YEARS, value=state["year"], label="Jahr",
+        ui.select(years(), value=state["year"], label="Jahr",
                   on_change=lambda e: _change_year(e.value)).props("outlined dense").classes("w-28")
         ui.button("Mitarbeiter hinzufügen", icon="person_add", on_click=lambda: _add_dialog())
 

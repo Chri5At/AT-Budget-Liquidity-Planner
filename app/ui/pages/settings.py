@@ -66,10 +66,14 @@ def render() -> None:
             opening_date = ui.input("Anfangsdatum (YYYY-MM-DD)", value=data["opening_balance_date"])
             hstart = ui.input("Planungsbeginn (YYYY-MM-DD)", value=data["horizon_start"])
             hend = ui.input("Planungsende (YYYY-MM-DD)", value=data["horizon_end"])
+            ui.label("Planungsende auf z. B. 2028-12-31 setzen, um das Jahr 2028 überall "
+                     "(Tabellen, Auswahl, Export) hinzuzufügen.").classes("text-xs text-gray-500")
 
         def save() -> None:
+            horizon_changed = False
             with get_session() as s:
                 st = get_settings(s)
+                old_span = (st.horizon_start.year, st.horizon_end.year)
                 st.company_name = name.value
                 st.split_model = SplitModel(model.value)
                 st.abgaben_pct = float(abg.value or 0) / 100
@@ -84,10 +88,15 @@ def render() -> None:
                 except ValueError:
                     ui.notify("Datumsformat: YYYY-MM-DD", type="warning")
                     return
+                horizon_changed = (st.horizon_start.year, st.horizon_end.year) != old_span
                 s.add(st)
                 s.commit()
             recompute_all()
-            ui.notify("Gespeichert und neu berechnet", type="positive")
+            if horizon_changed:
+                ui.notify("Planungszeitraum geändert — Seite wird neu geladen", type="positive")
+                ui.navigate.reload()
+            else:
+                ui.notify("Gespeichert und neu berechnet", type="positive")
 
         ui.button("Speichern", icon="save", on_click=save).classes("mt-2")
 

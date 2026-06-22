@@ -16,10 +16,11 @@ from ...services.snapshots import (
     restore_snapshot,
     snapshot_kpis,
 )
-from ..formatting import MONTHS_DE, YEARS, eur
+from ..formatting import MONTHS_DE, eur, years
 
-# (year, month) range options for the scenario export, e.g. "2026-07" -> "Jul 2026".
-_PERIOD_OPTS = {f"{y}-{m:02d}": f"{MONTHS_DE[m - 1]} {y}" for y in YEARS for m in range(1, 13)}
+def _period_opts() -> dict[str, str]:
+    """(year, month) range options for the export, e.g. '2026-07' -> 'Jul 2026'."""
+    return {f"{y}-{m:02d}": f"{MONTHS_DE[m - 1]} {y}" for y in years() for m in range(1, 13)}
 
 
 def _parse_ym(s: str) -> tuple[int, int]:
@@ -32,7 +33,7 @@ def _safe(name: str) -> str:
 
 
 def render() -> None:
-    state = {"compare_id": None, "year": YEARS[0], "scenario": 1}
+    state = {"compare_id": None, "year": years()[0], "scenario": 1}
 
     ui.label("Snapshots").classes("text-xl font-bold")
     ui.label("Speichere den vollständigen Planungsstand, um ihn später wieder zu laden oder "
@@ -42,8 +43,8 @@ def render() -> None:
         ui.button("Snapshot erstellen", icon="photo_camera", on_click=lambda: _create_dialog())
 
     # --- Excel export ----------------------------------------------------------
-    exp = {"scenario": 1, "year": YEARS[0],
-           "start": f"{YEARS[0]}-01", "end": f"{YEARS[-1]}-12"}
+    exp = {"scenario": 1, "year": years()[0],
+           "start": f"{years()[0]}-01", "end": f"{years()[-1]}-12"}
 
     def _export_scenario() -> None:
         start, end = _parse_ym(exp["start"]), _parse_ym(exp["end"])
@@ -73,15 +74,16 @@ def render() -> None:
             ui.select(sc_opts, value=exp["scenario"], label="Szenario",
                       on_change=lambda e: exp.update(scenario=int(e.value))
                       ).props("dense outlined").classes("w-44")
-            ui.select(_PERIOD_OPTS, value=exp["start"], label="Von",
+            _popts = _period_opts()
+            ui.select(_popts, value=exp["start"], label="Von",
                       on_change=lambda e: exp.update(start=e.value)
                       ).props("dense outlined").classes("w-36")
-            ui.select(_PERIOD_OPTS, value=exp["end"], label="Bis",
+            ui.select(_popts, value=exp["end"], label="Bis",
                       on_change=lambda e: exp.update(end=e.value)
                       ).props("dense outlined").classes("w-36")
             ui.button("Szenario exportieren", icon="download", on_click=_export_scenario)
             ui.separator().props("vertical")
-            ui.select(YEARS, value=exp["year"], label="Jahr (Vergleich)",
+            ui.select(years(), value=exp["year"], label="Jahr (Vergleich)",
                       on_change=lambda e: exp.update(year=int(e.value))
                       ).props("dense outlined").classes("w-32")
             ui.button("Szenarienvergleich exportieren", icon="compare_arrows",
@@ -179,7 +181,7 @@ def render() -> None:
         ui.separator().classes("my-3")
         with ui.row().classes("items-center gap-3"):
             ui.label(f"Vergleich: {snap.name} vs. aktuell").classes("text-base font-semibold")
-            ui.select(YEARS, value=state["year"], label="Jahr",
+            ui.select(years(), value=state["year"], label="Jahr",
                       on_change=lambda e: (_set("year", int(e.value)))
                       ).props("dense outlined").classes("w-28")
             ui.select(scs, value=state["scenario"], label="Szenario",
