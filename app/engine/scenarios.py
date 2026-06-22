@@ -8,7 +8,16 @@ from __future__ import annotations
 
 from sqlmodel import Session, select
 
-from ..models import CostCategory, RevenueStream, Scenario, ScenarioDisable
+from ..models import (
+    CostCategory,
+    CostCellEntry,
+    CostPlanMonth,
+    RevenueCellEntry,
+    RevenuePlanMonth,
+    RevenueStream,
+    Scenario,
+    ScenarioDisable,
+)
 
 BASE_SCENARIO_ID = 1
 
@@ -86,12 +95,50 @@ def set_disabled(session: Session, scenario_id: int, ref_kind: str, ref_id: int,
     session.commit()
 
 
+def _fork_rows(session: Session, sc_id: int, base_id: int, model, plan_model,
+               plan_fk: str, cell_model, cell_fk: str, ref_kind: str) -> None:
+    """Deep-copy every base row (+ plan months + cell breakdowns) into the new
+    scenario, remapping parent_id, then disable the base rows so they don't also
+    inherit (avoids double-counting). The scenario becomes an independent copy."""
+    base_rows = [r for r in session.exec(select(model).order_by(
+        model.sort_order, model.id)).all() if r.scenario_id == base_id]
+    id_map: dict[int, int] = {}
+    for r in base_rows:
+        data = r.model_dump(exclude={"id"})
+        data["scenario_id"] = sc_id
+        data["parent_id"] = None                      # remapped in the second pass
+        copy = model(**data)
+        session.add(copy)
+        session.flush()                               # assign copy.id
+        id_map[r.id] = copy.id
+        for p in session.exec(select(plan_model).where(getattr(plan_model, plan_fk) == r.id)).all():
+            pd = p.model_dump(exclude={"id"})
+            pd[plan_fk] = copy.id
+            session.add(plan_model(**pd))
+        for c in session.exec(select(cell_model).where(getattr(cell_model, cell_fk) == r.id)).all():
+            cd = c.model_dump(exclude={"id"})
+            cd[cell_fk] = copy.id
+            session.add(cell_model(**cd))
+    for r in base_rows:
+        if r.parent_id and r.parent_id in id_map:
+            copy = session.get(model, id_map[r.id])
+            copy.parent_id = id_map[r.parent_id]
+            session.add(copy)
+        session.add(ScenarioDisable(scenario_id=sc_id, ref_kind=ref_kind, ref_id=r.id))
+    session.commit()
+
+
 def create_scenario(session: Session, name: str, base_id: int = BASE_SCENARIO_ID) -> Scenario:
     order = max([s.sort_order for s in list_scenarios(session)], default=0) + 1
     sc = Scenario(name=name, base_id=base_id, sort_order=order)
     session.add(sc)
     session.commit()
     session.refresh(sc)
+    # Fork: the scenario gets its own independent, editable copy of all base rows.
+    _fork_rows(session, sc.id, base_id, RevenueStream, RevenuePlanMonth, "stream_id",
+               RevenueCellEntry, "stream_id", "revenue")
+    _fork_rows(session, sc.id, base_id, CostCategory, CostPlanMonth, "category_id",
+               CostCellEntry, "category_id", "cost")
     return sc
 
 
@@ -102,18 +149,23 @@ def delete_scenario(session: Session, scenario_id: int) -> None:
     for sd in session.exec(select(ScenarioDisable).where(
             ScenarioDisable.scenario_id == scenario_id)).all():
         session.delete(sd)
-    from ..models import CostPlanMonth, RevenuePlanMonth
     for row in session.exec(select(RevenueStream).where(
             RevenueStream.scenario_id == scenario_id)).all():
         for pm in session.exec(select(RevenuePlanMonth).where(
                 RevenuePlanMonth.stream_id == row.id)).all():
             session.delete(pm)
+        for ce in session.exec(select(RevenueCellEntry).where(
+                RevenueCellEntry.stream_id == row.id)).all():
+            session.delete(ce)
         session.delete(row)
     for row in session.exec(select(CostCategory).where(
             CostCategory.scenario_id == scenario_id)).all():
         for pm in session.exec(select(CostPlanMonth).where(
                 CostPlanMonth.category_id == row.id)).all():
             session.delete(pm)
+        for ce in session.exec(select(CostCellEntry).where(
+                CostCellEntry.category_id == row.id)).all():
+            session.delete(ce)
         session.delete(row)
     sc = session.get(Scenario, scenario_id)
     if sc is not None:

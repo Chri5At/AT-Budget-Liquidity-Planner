@@ -302,8 +302,8 @@ def render() -> None:
     def matrix() -> None:
         rows = _load_tree_rows(state["year"], state["scenario"], state["collapsed"])
         if not rows and state["scenario"] != 1:
-            ui.label("Keine eigenen Einnahmen in diesem Szenario — füge welche hinzu oder "
-                     "schalte unten Basis-Positionen ein/aus.").classes("text-sm text-gray-500")
+            ui.label("Keine Einnahmen in diesem Szenario — füge Positionen hinzu.").classes(
+                "text-sm text-gray-500")
         editable = "params => params.data.kind !== 'category'"
         # Month cells are NOT single-click editable when they carry a line-item
         # breakdown (editing would discard it) — those are edited via double-click.

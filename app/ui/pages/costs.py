@@ -233,8 +233,8 @@ def render() -> None:
     def matrix() -> None:
         rows = _load_tree_rows(state["year"], state["scenario"], state["collapsed"])
         if not rows and state["scenario"] != 1:
-            ui.label("Keine eigenen Ausgaben in diesem Szenario — füge welche hinzu oder "
-                     "schalte unten Basis-Positionen ein/aus.").classes("text-sm text-gray-500")
+            ui.label("Keine Ausgaben in diesem Szenario — füge Positionen hinzu.").classes(
+                "text-sm text-gray-500")
         editable = "params => params.data.kind !== 'category'"
         editable_month = ("params => params.data.kind !== 'category' && "
                           "!params.data['detail'+params.colDef.field.substring(1)]")
