@@ -32,6 +32,18 @@ def index() -> None:
     def _toggle() -> None:
         nav_state["mini"] = not nav_state["mini"]
         drawer.props(add="mini") if nav_state["mini"] else drawer.props(remove="mini")
+        # ag-Grid only reflows on a resize signal; the drawer animates ~300ms, so
+        # nudge it a few times across the transition to avoid stale widths/glitches.
+        ui.run_javascript("[60,180,320,420].forEach(t => setTimeout("
+                          "() => window.dispatchEvent(new Event('resize')), t));")
+
+    # After the user stops resizing the window, fire one clean resize so every
+    # ag-Grid does a final settled reflow (guards against recursion).
+    ui.add_body_html(
+        "<script>(function(){let busy=false;window.addEventListener('resize',function(){"
+        "if(busy)return;clearTimeout(window.__agReflow);window.__agReflow=setTimeout("
+        "function(){busy=true;window.dispatchEvent(new Event('resize'));"
+        "setTimeout(function(){busy=false;},80);},160);});})();</script>")
 
     with ui.header().props("dense").classes("items-center bg-primary"):
         ui.button(icon="menu", on_click=_toggle).props("flat color=white dense round")
