@@ -28,6 +28,13 @@ _LOAN_KIND_DE = {
     LoanKind.OWNER_LOAN: "Gesellschafterdarlehen",
     LoanKind.GF_LOAN: "GF-Darlehen",
 }
+# A Quasar input with a thousands mask shows "222.000"; parse strips the separators.
+_AMOUNT_PROPS = 'dense outlined mask="#.###.###.###" reverse-fill-mask'
+
+
+def _parse_amount(v: str) -> float:
+    digits = "".join(ch for ch in (v or "") if ch.isdigit())
+    return float(digits) if digits else 0.0
 
 _PRESETS = {"all": "Gesamter Zeitraum", "this_year": "Dieses Jahr", "next_year": "Nächstes Jahr",
             "this_q": "Dieses Quartal", "next_q": "Nächstes Quartal", "custom": "Benutzerdefiniert"}
@@ -108,8 +115,9 @@ def render() -> None:
                 ui.input("Bis (YYYY-MM-DD)", value=state["end"],
                          on_change=lambda e: (state.update(end=e.value), build())
                          ).props("dense outlined").classes("w-44")
-            ui.toggle(_GRANS, value=state["gran"],
-                      on_change=lambda e: (state.update(gran=e.value), build())).props("dense")
+            ui.select(_GRANS, value=state["gran"], label="Granularität",
+                      on_change=lambda e: (state.update(gran=e.value), build())
+                      ).props("dense outlined").classes("w-56")
 
     def build() -> None:
         container.clear()
@@ -142,10 +150,15 @@ def render() -> None:
                            "data": pivot.bank, "areaStyle": {"opacity": 0.06}}]
                 legend = ["Bank Status"]
             ui.echart({
-                "tooltip": {"trigger": "axis"},
+                "tooltip": {"trigger": "axis",
+                            ":valueFormatter": "v => Math.round(v).toLocaleString('de-DE') + ' €'"},
                 "legend": {"data": legend},
+                "grid": {"left": 70, "right": 24, "top": 40, "bottom": 70},
                 "xAxis": {"type": "category", "data": labels, "axisLabel": {"rotate": 60, "fontSize": 9}},
-                "yAxis": {"type": "value"},
+                # Axis in thousands of euros, no thousands-separators on the ticks.
+                "yAxis": {"type": "value", "name": "Tsd. €",
+                          "nameTextStyle": {"color": "#888", "fontSize": 11},
+                          "axisLabel": {":formatter": "v => Math.round(v/1000)"}},
                 "series": series,
             }).classes("w-full").style("height: 320px")
             if multi:
@@ -290,9 +303,10 @@ def render() -> None:
                         ui.select(_LOAN_KIND_DE, value=kind,
                                   on_change=lambda e, lid=lid: _save_loan_field(lid, kind=LoanKind(e.value))
                                   ).props("dense outlined").classes("w-44")
-                        ui.number("Betrag", value=round(principal), step=1000, min=0,
-                                  on_change=lambda e, lid=lid: _save_loan_field(lid, principal=float(e.value or 0))
-                                  ).props("dense outlined").classes("w-32")
+                        ui.input("Betrag", value=str(int(round(principal))),
+                                 on_change=lambda e, lid=lid: _save_loan_field(
+                                     lid, principal=_parse_amount(e.value))
+                                 ).props(_AMOUNT_PROPS).classes("w-36")
                         ui.input("YYYY-MM-DD", value=dstr,
                                  on_change=lambda e, lid=lid: _save_loan_field(lid, disbursement_date=e.value)
                                  ).props("dense outlined").classes("w-40")
@@ -326,22 +340,38 @@ def render() -> None:
 
     def _delete_loan(lid: int) -> None:
         with get_session() as s:
-            for sch in s.exec(select(LoanSchedule).where(LoanSchedule.loan_id == lid)).all():
-                s.delete(sch)
             lo = s.get(Loan, lid)
-            if lo is not None:
-                s.delete(lo)
-            s.commit()
-        ui.notify("Darlehen/Förderung gelöscht", type="positive")
-        loans_panel.refresh()
-        build()
+            name = lo.name if lo else ""
+        with ui.dialog() as dlg, ui.card():
+            ui.label(f'„{name}" wirklich löschen?').classes("text-base font-bold")
+            ui.label("Die Auszahlung und der Zins-/Tilgungsplan dieses Eintrags werden "
+                     "entfernt.").classes("text-sm text-gray-500")
+            with ui.row():
+                ui.button("Abbrechen", on_click=dlg.close).props("flat")
+
+                def _do() -> None:
+                    with get_session() as s:
+                        for sch in s.exec(select(LoanSchedule).where(
+                                LoanSchedule.loan_id == lid)).all():
+                            s.delete(sch)
+                        lo2 = s.get(Loan, lid)
+                        if lo2 is not None:
+                            s.delete(lo2)
+                        s.commit()
+                    dlg.close()
+                    ui.notify("Darlehen/Förderung gelöscht", type="positive")
+                    loans_panel.refresh()
+                    build()
+
+                ui.button("Löschen", icon="delete", color="negative", on_click=_do)
+        dlg.open()
 
     def _add_loan_dialog() -> None:
         with ui.dialog() as dlg, ui.card():
             ui.label("Neues Darlehen / Förderung").classes("text-lg font-bold")
             name = ui.input("Bezeichnung", value="Förderung").classes("w-72")
             kind = ui.select(_LOAN_KIND_DE, value=LoanKind.EU_FUNDING, label="Art").classes("w-72")
-            amount = ui.number("Betrag / Auszahlung (€)", value=0, step=1000, min=0).classes("w-48")
+            amount = ui.input("Betrag / Auszahlung (€)", value="0").props(_AMOUNT_PROPS).classes("w-48")
             d = ui.input("Auszahlung (YYYY-MM-DD)", value=date.today().isoformat()).classes("w-48")
             with ui.row():
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
@@ -355,7 +385,7 @@ def render() -> None:
                     k = LoanKind(kind.value)
                     with get_session() as s:
                         s.add(Loan(name=name.value or "Förderung", kind=k,
-                                   principal=float(amount.value or 0), disbursement_date=dd,
+                                   principal=_parse_amount(amount.value), disbursement_date=dd,
                                    is_eu_funding=(k == LoanKind.EU_FUNDING)))
                         s.commit()
                     dlg.close()
@@ -404,11 +434,24 @@ def render() -> None:
     def _delete_investment(iid: int) -> None:
         with get_session() as s:
             inv = s.get(Investment, iid)
-            if inv is not None:
-                s.delete(inv)
-                s.commit()
-        ui.notify("Investment gelöscht", type="positive")
-        _refresh_all()
+            label = (inv.label or inv.investor) if inv else ""
+        with ui.dialog() as dlg, ui.card():
+            ui.label(f'„{label}" wirklich löschen?').classes("text-base font-bold")
+            with ui.row():
+                ui.button("Abbrechen", on_click=dlg.close).props("flat")
+
+                def _do() -> None:
+                    with get_session() as s:
+                        inv2 = s.get(Investment, iid)
+                        if inv2 is not None:
+                            s.delete(inv2)
+                            s.commit()
+                    dlg.close()
+                    ui.notify("Investment gelöscht", type="positive")
+                    _refresh_all()
+
+                ui.button("Löschen", icon="delete", color="negative", on_click=_do)
+        dlg.open()
 
     with controls_area:
         controls()
