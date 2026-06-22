@@ -175,31 +175,39 @@ def _sheet_budget(ws, session: Session, scenario_id: int, stamp: str, sc_name: s
 def _sheet_liquidity(ws, session: Session, scenario_id: int, stamp: str, sc_name: str,
                      start_date=None, end_date=None) -> None:
     _title(ws, "Liquidität", f"Szenario: {sc_name} · Erstellt: {stamp}")
-    headers = ["Datum", "Einzahlungen", "Auszahlungen", "davon Subunternehmer",
-               "Saldo", "Bank Status", "ohne EU-Förderung"]
-    _header_row(ws, 4, headers)
     rows = liquidity_view_for_scenario(session, scenario_id)
     if start_date or end_date:
         rows = [br for br in rows
                 if (start_date is None or br.bucket >= start_date)
                 and (end_date is None or br.bucket <= end_date)]
+    # Only compare "ohne Förderung" when there actually is funding in the data.
+    has_funding = any(abs(br.balance - br.balance_no_eu) > 0.5 for br in rows)
+    headers = ["Datum", "Einzahlungen", "Auszahlungen", "davon Subunternehmer",
+               "Saldo", "Bank Status"]
+    if has_funding:
+        headers.append("Bank Status ohne Förderung")
+    _header_row(ws, 4, headers)
+    bank_col = 6
     r = 5
     for br in rows:
         ws.cell(row=r, column=1, value=br.label)
-        for col, val in enumerate([br.inflow, br.outflow, br.subcontractor, br.net,
-                                    br.balance, br.balance_no_eu], start=2):
+        vals = [br.inflow, br.outflow, br.subcontractor, br.net, br.balance]
+        if has_funding:
+            vals.append(br.balance_no_eu)
+        for col, val in enumerate(vals, start=2):
             c = ws.cell(row=r, column=col, value=round(val))
             c.number_format = _EUR
         r += 1
-    _autosize(ws, {1: 12, 2: 14, 3: 14, 4: 18, 5: 13, 6: 14, 7: 16})
-    # Line chart of the running balance.
+    _autosize(ws, {1: 12, 2: 14, 3: 14, 4: 18, 5: 13, 6: 14, 7: 18})
+    # Line chart of the running balance (incl. the ohne-Förderung curve if present).
     if rows:
         chart = LineChart()
         chart.title = "Bank Status (Verlauf)"
         chart.height = 9
         chart.width = 24
         chart.style = 10
-        data = Reference(ws, min_col=6, min_row=4, max_col=7, max_row=4 + len(rows))
+        max_col = bank_col + (1 if has_funding else 0)
+        data = Reference(ws, min_col=bank_col, min_row=4, max_col=max_col, max_row=4 + len(rows))
         cats = Reference(ws, min_col=1, min_row=5, max_row=4 + len(rows))
         chart.add_data(data, titles_from_data=True)
         chart.set_categories(cats)

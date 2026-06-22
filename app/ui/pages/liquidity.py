@@ -149,6 +149,12 @@ def render() -> None:
                 series = [{"name": "Bank Status", "type": "line", "smooth": True,
                            "data": pivot.bank, "areaStyle": {"opacity": 0.06}}]
                 legend = ["Bank Status"]
+                # Only compare "ohne Förderung" when there actually is funding.
+                if any(a != b for a, b in zip(pivot.bank, pivot.bank_no_eu)):
+                    series.append({"name": "Bank Status ohne Förderung", "type": "line",
+                                   "smooth": True, "data": pivot.bank_no_eu,
+                                   "lineStyle": {"type": "dashed"}})
+                    legend.append("Bank Status ohne Förderung")
             ui.echart({
                 "tooltip": {"trigger": "axis",
                             ":valueFormatter": "v => Math.round(v).toLocaleString('de-DE') + ' €'"},
@@ -164,6 +170,9 @@ def render() -> None:
             if multi:
                 ui.label("Mehrere Szenarien werden im Diagramm überlagert."
                          ).classes("text-xs text-gray-500")
+            elif len(legend) > 1:
+                ui.label("„ohne Förderung“ = derselbe Verlauf ohne die Förder-Einzahlungen "
+                         "(zum Vergleich).").classes("text-xs text-gray-500")
 
             low = min(pivot.bank)
             with ui.row().classes("gap-6 my-2 flex-wrap"):
