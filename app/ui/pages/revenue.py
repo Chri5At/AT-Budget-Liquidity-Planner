@@ -165,6 +165,24 @@ def _cat_month_total(s, cat_id: int, year: int, month: int) -> int:
     return round(total)
 
 
+def _month_grand_totals(s, year: int, scenario_id: int) -> list[int]:
+    """Per-month total across all rows (each row's own value counts once) for the
+    pinned bottom Σ-row."""
+    ids = {st.id for st in s.exec(select(RevenueStream)).all() if st.scenario_id == scenario_id}
+    totals = [0.0] * 12
+    for pm in s.exec(select(RevenuePlanMonth).where(RevenuePlanMonth.year == year)).all():
+        if pm.stream_id in ids and 1 <= pm.month <= 12:
+            totals[pm.month - 1] += pm.amount
+    return [round(x) for x in totals]
+
+
+def _grandtotal_row(totals: list[int]) -> dict:
+    row = {"rid": "grandtotal", "kind": "grandtotal", "name": "Σ Gesamt / Monat"}
+    for i, v in enumerate(totals):
+        row[f"m{i + 1}"] = v
+    return row
+
+
 def _save_name_cell(stream_id: int, name: str) -> None:
     with get_session() as s:
         st = s.get(RevenueStream, stream_id)
@@ -359,14 +377,19 @@ def render() -> None:
                 return
             month = int(col[1:])
             _save_amount_cell(sid, state["year"], month, data.get(col, 0))
+            grid = state.get("grid")
+            if grid is None:
+                return
             # A child/direct edit changes its category total — update ONLY that
             # category's cell in place (no full refresh → keeps focus for fast editing).
             cat_id = data.get("cat_id")
-            grid = state.get("grid")
-            if cat_id and grid is not None:
-                with get_session() as s:
-                    total = _cat_month_total(s, int(cat_id), state["year"], month)
-                grid.run_row_method(f"cat-{cat_id}", "setDataValue", col, total)
+            with get_session() as s:
+                if cat_id:
+                    grid.run_row_method(f"cat-{cat_id}", "setDataValue", col,
+                                        _cat_month_total(s, int(cat_id), state["year"], month))
+                totals = _month_grand_totals(s, state["year"], state["scenario"])
+            # Refresh the pinned bottom Σ-row (its month total just changed).
+            grid.run_grid_method("setGridOption", "pinnedBottomRowData", [_grandtotal_row(totals)])
 
     def _on_cell_click(e) -> None:
         a = e.args or {}
