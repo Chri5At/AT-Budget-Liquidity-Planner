@@ -16,7 +16,11 @@ from openpyxl.utils import get_column_letter
 from sqlmodel import Session, select
 
 from ..db import get_settings
-from ..engine.liquidity import liquidity_view, liquidity_view_for_scenario
+from ..engine.liquidity import (
+    liquidity_pivot_for_scenario,
+    liquidity_view,
+    liquidity_view_for_scenario,
+)
 from ..engine.payroll_at import employee_year_cost, ruleset_for_year
 from ..engine.pnl import pnl_view
 from ..engine.scenarios import effective_cost_ids, effective_revenue_ids, get_scenario, list_scenarios
@@ -95,30 +99,54 @@ def _year_months(start: tuple[int, int], end: tuple[int, int]) -> dict[int, list
 
 # --- data helpers ----------------------------------------------------------------
 
-def _revenue_matrix(session: Session, scenario, year: int):
-    ids = effective_revenue_ids(session, scenario)
-    streams = [st for st in session.exec(select(RevenueStream).order_by(
-        RevenueStream.sort_order, RevenueStream.id)).all() if st.id in ids]
+def _tree(rows_all, parent_attr, plan_model, plan_fk, session, ids, year):
+    """Generic category tree: (name, [12 vals], level, is_category) rows — categories
+    (own + children) first, then their indented children, then top-level leaves."""
+    items = [x for x in rows_all if x.id in ids]
+    by_id = {x.id: x for x in items}
+    children: dict = {}
+    tops = []
+    for x in items:
+        pid = getattr(x, parent_attr)
+        if pid and pid in by_id:
+            children.setdefault(pid, []).append(x)
+        else:
+            tops.append(x)
+
+    def vals(xid):
+        m = {p.month: p.amount for p in session.exec(select(plan_model).where(
+            getattr(plan_model, plan_fk) == xid, plan_model.year == year)).all()}
+        return [round(m.get(i, 0.0)) for i in range(1, 13)]
+
     out = []
-    for st in streams:
-        months = {p.month: p.amount for p in session.exec(select(RevenuePlanMonth).where(
-            RevenuePlanMonth.stream_id == st.id, RevenuePlanMonth.year == year)).all()}
-        vals = [round(months.get(m, 0.0)) for m in range(1, 13)]
-        out.append((st.name, vals))
+    for x in tops:
+        if getattr(x, "is_category", False):
+            own = vals(x.id)
+            kids = children.get(x.id, [])
+            kv = [vals(k.id) for k in kids]
+            total = [own[i] + sum(v[i] for v in kv) for i in range(12)]
+            out.append((x.name, total, 0, True))
+            if any(own):
+                out.append(("Allgemein (direkt)", own, 1, False))
+            for k, v in zip(kids, kv):
+                out.append((k.name, v, 1, False))
+        else:
+            out.append((x.name, vals(x.id), 0, False))
     return out
+
+
+def _revenue_matrix(session: Session, scenario, year: int):
+    ids = set(effective_revenue_ids(session, scenario))
+    alls = session.exec(select(RevenueStream).order_by(
+        RevenueStream.sort_order, RevenueStream.id)).all()
+    return _tree(alls, "parent_id", RevenuePlanMonth, "stream_id", session, ids, year)
 
 
 def _cost_matrix(session: Session, scenario, year: int):
-    ids = effective_cost_ids(session, scenario)
-    cats = [c for c in session.exec(select(CostCategory).order_by(
-        CostCategory.sort_order, CostCategory.id)).all() if c.id in ids]
-    out = []
-    for c in cats:
-        months = {p.month: p.amount for p in session.exec(select(CostPlanMonth).where(
-            CostPlanMonth.category_id == c.id, CostPlanMonth.year == year)).all()}
-        vals = [round(months.get(m, 0.0)) for m in range(1, 13)]
-        out.append((c.name, vals))
-    return out
+    ids = set(effective_cost_ids(session, scenario))
+    alls = session.exec(select(CostCategory).order_by(
+        CostCategory.sort_order, CostCategory.id)).all()
+    return _tree(alls, "parent_id", CostPlanMonth, "category_id", session, ids, year)
 
 
 def _personnel_rows(session: Session, year: int):
@@ -215,6 +243,55 @@ def _sheet_liquidity(ws, session: Session, scenario_id: int, stamp: str, sc_name
         ws.add_chart(chart, "I4")
 
 
+def _sheet_liquidity_detail(ws, session: Session, scenario_id: int, stamp: str, sc_name: str,
+                            start_date=None, end_date=None) -> None:
+    """Detailed liquidity: months as columns, Ein-/Auszahlungen split by category
+    (category groups + line items), mirroring the app's breakdown."""
+    pivot = liquidity_pivot_for_scenario(session, scenario_id, granularity="monthly",
+                                         range_start=start_date, range_end=end_date)
+    _title(ws, "Liquidität – Detail nach Kategorie (monatlich)",
+           f"Szenario: {sc_name} · Erstellt: {stamp}")
+    n = len(pivot.labels)
+    last = 2 + n                       # Position + n months + Summe
+    _header_row(ws, 4, ["Position", *pivot.labels, "Summe"])
+    has_funding = any(a != b for a, b in zip(pivot.bank, pivot.bank_no_eu))
+    state = {"row": 5}
+
+    def write(label, vals, *, bold=False, indent=0, fill=None, total=None) -> None:
+        r = state["row"]
+        nc = ws.cell(row=r, column=1, value=("  " * indent) + label)
+        cells = [nc]
+        for i, v in enumerate(vals):
+            c = ws.cell(row=r, column=2 + i, value=round(v))
+            c.number_format = _EUR
+            cells.append(c)
+        t = total if total is not None else sum(vals)
+        sc = ws.cell(row=r, column=last, value=round(t))
+        sc.number_format = _EUR
+        cells.append(sc)
+        for c in cells:
+            if bold:
+                c.font = _BOLD
+            if fill:
+                c.fill = fill
+        state["row"] = r + 1
+
+    sec_fill = PatternFill("solid", fgColor="E8EEFB")
+    grp_fill = PatternFill("solid", fgColor="F3F6FD")
+    for sec in pivot.sections:
+        write(sec.name, sec.totals, bold=True, fill=sec_fill)
+        for g in sec.groups:
+            write(g.name, g.totals, bold=True, indent=1, fill=grp_fill)
+            for label, vals in g.items:
+                write(label, vals, indent=2)
+    write("= Saldo", pivot.saldo, bold=True, fill=sec_fill)
+    write("Bank Status", pivot.bank, bold=True, total=pivot.bank[-1])
+    if has_funding:
+        write("Bank Status ohne Förderung", pivot.bank_no_eu, bold=True,
+              total=pivot.bank_no_eu[-1])
+    _autosize(ws, {1: 34, **{c: 12 for c in range(2, last + 1)}})
+
+
 def _sheet_personal(ws, session: Session, stamp: str, sc_name: str,
                     year_months: dict[int, list[int]]) -> None:
     _title(ws, "Personal", f"Erstellt: {stamp}")
@@ -272,14 +349,22 @@ def _sheet_matrix(ws, title: str, stamp: str, sc_name: str, session: Session,
         _header_row(ws, row, _month_headers(months))
         row += 1
         total = [0] * 12
-        for name, vals in data_fn(session, scenario, year):
-            ws.cell(row=row, column=1, value=name)
+        for name, vals, level, is_cat in data_fn(session, scenario, year):
+            nc = ws.cell(row=row, column=1, value=("  " * level) + name)
+            if is_cat:
+                nc.font = _BOLD
             for i, m in enumerate(months):
                 c = ws.cell(row=row, column=2 + i, value=vals[m - 1])
                 c.number_format = _EUR
-                total[m - 1] += vals[m - 1]
+                if is_cat:
+                    c.font = _BOLD
             jc = ws.cell(row=row, column=last, value=sum(vals[m - 1] for m in months))
             jc.number_format = _EUR
+            if is_cat:
+                jc.font = _BOLD
+            if level == 0:                       # top-level rows make up the grand total
+                for m in range(12):
+                    total[m] += vals[m]
             row += 1
         ws.cell(row=row, column=1, value="Summe").font = _BOLD
         for i, m in enumerate(months):
@@ -324,6 +409,8 @@ def export_single_scenario(session: Session, scenario_id: int = 1,
     _sheet_budget(ws, session, scenario_id, stamp, scenario.name, ym)
     _sheet_liquidity(wb.create_sheet("Liquidität"), session, scenario_id, stamp,
                      scenario.name, start_date, end_date)
+    _sheet_liquidity_detail(wb.create_sheet("Liquidität-Detail"), session, scenario_id,
+                            stamp, scenario.name, start_date, end_date)
     _sheet_personal(wb.create_sheet("Personal"), session, stamp, scenario.name, ym)
     _sheet_matrix(wb.create_sheet("Einnahmen"), "Einnahmen", stamp, scenario.name,
                   session, _revenue_matrix, scenario, ym)
