@@ -10,6 +10,7 @@ from datetime import datetime
 
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.chart.axis import ChartLines
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from sqlmodel import Session, select
@@ -58,6 +59,21 @@ def _header_row(ws, row: int, headers: list[str]) -> None:
 def _autosize(ws, widths: dict[int, int]) -> None:
     for col, w in widths.items():
         ws.column_dimensions[get_column_letter(col)].width = w
+
+
+def _style_chart(chart, x_title: str, y_title: str) -> None:
+    """Force axis tick labels + titles and a bottom legend (openpyxl hides axes by
+    default unless delete=False is set)."""
+    chart.x_axis.delete = False
+    chart.y_axis.delete = False
+    chart.x_axis.title = x_title
+    chart.y_axis.title = y_title
+    chart.x_axis.tickLblPos = "low"        # keep date labels at the bottom (charts cross 0)
+    chart.y_axis.tickLblPos = "nextTo"
+    chart.y_axis.numFmt = '#,##0 "€"'
+    chart.y_axis.majorGridlines = ChartLines()
+    if chart.legend is not None:
+        chart.legend.position = "b"
 
 
 def _month_headers(months: list[int]) -> list[str]:
@@ -179,14 +195,16 @@ def _sheet_liquidity(ws, session: Session, scenario_id: int, stamp: str, sc_name
     # Line chart of the running balance.
     if rows:
         chart = LineChart()
-        chart.title = "Bank Status"
+        chart.title = "Bank Status (Verlauf)"
         chart.height = 9
         chart.width = 24
+        chart.style = 10
         data = Reference(ws, min_col=6, min_row=4, max_col=7, max_row=4 + len(rows))
         cats = Reference(ws, min_col=1, min_row=5, max_row=4 + len(rows))
         chart.add_data(data, titles_from_data=True)
         chart.set_categories(cats)
-        ws.add_chart(chart, f"I4")
+        _style_chart(chart, "Datum", "Euro")
+        ws.add_chart(chart, "I4")
 
 
 def _sheet_personal(ws, session: Session, stamp: str, sc_name: str,
@@ -351,6 +369,7 @@ def export_scenario_comparison(session: Session, year: int) -> bytes:
     cats = Reference(ws, min_col=1, min_row=5, max_row=4 + len(keys))
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
+    _style_chart(chart, "Kennzahl", "Euro")
     ws.add_chart(chart, f"A{r + 2}")
 
     # Liquidity overlay sheet: Bank Status per scenario over time.
@@ -384,6 +403,7 @@ def export_scenario_comparison(session: Session, year: int) -> bytes:
         cats2 = Reference(ws2, min_col=1, min_row=5, max_row=4 + len(labels))
         chart2.add_data(data2, titles_from_data=True)
         chart2.set_categories(cats2)
+        _style_chart(chart2, "Datum", "Euro")
         ws2.add_chart(chart2, f"{get_column_letter(len(series) + 3)}4")
         _autosize(ws2, {1: 12, **{c: 16 for c in range(2, 2 + len(series))}})
 
