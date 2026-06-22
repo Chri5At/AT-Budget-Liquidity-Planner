@@ -142,17 +142,20 @@ def render() -> None:
     def _restore_dialog(sid: int, name: str) -> None:
         with ui.dialog() as dlg, ui.card():
             ui.label(f'Snapshot „{name}“ laden?').classes("text-lg font-bold")
-            ui.label("Der aktuelle Planungsstand wird durch den Snapshot ersetzt. Erstelle "
-                     "vorher ggf. einen Snapshot des aktuellen Stands.").classes(
+            ui.label("Der aktuelle Planungsstand wird durch den Snapshot ersetzt. Es wird "
+                     "automatisch vorher eine Sicherung des aktuellen Stands erstellt.").classes(
                 "text-sm text-gray-500")
             with ui.row():
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
                 def _do() -> None:
                     with get_session() as s:
+                        # Safety net: snapshot the current state before it is replaced.
+                        create_snapshot(s, "Auto-Sicherung vor Laden",
+                                        f"automatisch vor Laden von „{name}“")
                         restore_snapshot(s, sid)
                     dlg.close()
-                    ui.notify("Snapshot geladen — Stand ersetzt", type="positive")
+                    ui.notify("Snapshot geladen — Auto-Sicherung erstellt", type="positive")
                     ui.navigate.reload()
 
                 ui.button("Laden", icon="restore", color="primary", on_click=_do)

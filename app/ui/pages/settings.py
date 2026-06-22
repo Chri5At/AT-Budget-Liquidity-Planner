@@ -113,7 +113,11 @@ def _confirm_reset() -> None:
             ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
             def _do() -> None:
+                from ...services.snapshots import create_snapshot
                 with get_session() as s:
+                    # Safety net: capture the current state so a reset can be undone.
+                    create_snapshot(s, "Auto-Sicherung vor Zurücksetzen",
+                                    "automatisch vor „Alle Daten löschen“")
                     for table in _RESET_TABLES:
                         s.execute(sa_delete(table))
                     st = get_settings(s)
@@ -122,7 +126,7 @@ def _confirm_reset() -> None:
                     s.add(st)
                     s.commit()
                 dlg.close()
-                ui.notify("Alle Daten gelöscht — leere Planung", type="positive")
+                ui.notify("Alle Daten gelöscht (Auto-Sicherung erstellt)", type="positive")
                 ui.navigate.reload()
 
             ui.button("Alles löschen", icon="delete_forever", color="negative", on_click=_do)
