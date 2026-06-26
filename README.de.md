@@ -59,11 +59,33 @@ Alternativ unter Windows: Doppelklick auf `start.bat`.
 
 > **Voraussetzung:** Python **3.11 oder neuer**.
 
-## Für Endnutzer ohne Python (geplant)
+## Für Endnutzer ohne Python — eigenständige Windows-`.exe`
 
-Für nicht-technische Anwender sind **fertige Windows-Installer (eine `.exe`,
-erstellt mit PyInstaller)** geplant. Sobald verfügbar, findest du sie unter
-**[Releases](../../releases)** — dann ist keine Python-Installation nötig.
+Anwender ohne Python können eine **einzelne, in sich geschlossene `.exe`**
+ausführen, die die App in einem eigenen Desktop-Fenster öffnet (kein Browser,
+keine Konsole). So baust du sie selbst:
+
+```powershell
+# im Projektverzeichnis, mit bereits angelegtem .venv (siehe Schnellstart)
+powershell -ExecutionPolicy Bypass -File packaging\build_exe.ps1
+```
+
+Das installiert die reinen Build-Abhängigkeiten (PyInstaller + pywebview) und
+erzeugt mit `nicegui-pack` die Datei **`dist\BudgetLiquidity.exe`** (~55 MB).
+Diese eine Datei kannst du weitergeben — Python wird nicht benötigt.
+
+- **Beim ersten Start** wird eine frische Datenbank unter
+  `%LOCALAPPDATA%\BudgetLiquidity\` angelegt (mit den fiktiven Demo-Daten
+  befüllt). Deine eigenen Planungsdaten verlassen deinen Rechner nie und sind
+  **nicht** Teil der `.exe`.
+- **SmartScreen:** Die `.exe` ist **nicht signiert**, daher zeigt Windows eine
+  Warnung „unbekannte App" — klicke auf **Weitere Informationen → Trotzdem
+  ausführen**. Das ist normal; ein Installer oder Zertifikat würde daran nichts
+  ändern (die Reputation einer unsignierten Datei baut sich erst mit der Zeit auf).
+
+Das App-Icon (rot-weiß-rot mit steigendem Diagramm) wird von
+`packaging\make_icon.py` erzeugt. Vorgefertigte Releases können zusätzlich unter
+**[Releases](../../releases)** veröffentlicht werden.
 
 ## Reiter
 

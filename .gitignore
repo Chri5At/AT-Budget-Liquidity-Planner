@@ -58,6 +58,8 @@ build/
 dist/
 *.manifest
 # (keep *.spec — it is build source, not an artifact)
+# nicegui-pack regenerates this one from CLI flags on every build, so ignore it.
+/BudgetLiquidity.spec
 # Installer outputs
 *.exe
 *.msi
