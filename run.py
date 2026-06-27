@@ -74,7 +74,7 @@ if DEBUG:
     print(f"[run] DEBUG mode  port={PORT}  reload={RELOAD}  log={LOG_LEVEL}")
 print(f"[run] Starting on http://localhost:{PORT}")
 
-ui.run(
+run_kwargs = dict(
     title=APP_TITLE,
     port=PORT,
     reload=RELOAD,
@@ -83,3 +83,10 @@ ui.run(
     storage_secret="budget-liquidity-local",
     uvicorn_logging_level=LOG_LEVEL,
 )
+# Open the native window wide enough to start in desktop layout (the drawer
+# otherwise flips to a mobile overlay on a small initial window). window_size is
+# only valid in native mode — passing it would implicitly force native otherwise.
+if NATIVE:
+    run_kwargs["window_size"] = (1280, 820)
+
+ui.run(**run_kwargs)

@@ -136,7 +136,11 @@ def index() -> None:
         company = get_settings(s).company_name
     nav_state = {"mini": False}
 
-    drawer = (ui.left_drawer(value=True, fixed=True).props("bordered :width=210 :mini-width=60")
+    # behavior=desktop + breakpoint=0 stop Quasar from flipping the drawer into a
+    # mobile overlay (with a dimming backdrop) on narrow windows — in the packaged
+    # native window that state made the menu vanish with no way to reopen it.
+    drawer = (ui.left_drawer(value=True, fixed=True)
+              .props("bordered :width=210 :mini-width=60 behavior=desktop :breakpoint=0")
               .classes("bg-grey-1"))
 
     def _toggle() -> None:
@@ -147,13 +151,20 @@ def index() -> None:
         ui.run_javascript("[60,180,320,420].forEach(t => setTimeout("
                           "() => window.dispatchEvent(new Event('resize')), t));")
 
-    # After the user stops resizing the window, fire one clean resize so every
-    # ag-Grid does a final settled reflow (guards against recursion).
+    # Keep ag-Grids reflowed when the window changes size. The DOM 'resize' event
+    # alone is unreliable inside the packaged native window (WebView2 may skip it
+    # on resize / DPI change when dragging across monitors), so we also watch the
+    # document via a ResizeObserver. Both feed one debounced, settled resize that
+    # we dispatch across two animation frames to force a repaint + grid reflow.
     ui.add_body_html(
-        "<script>(function(){let busy=false;window.addEventListener('resize',function(){"
-        "if(busy)return;clearTimeout(window.__agReflow);window.__agReflow=setTimeout("
-        "function(){busy=true;window.dispatchEvent(new Event('resize'));"
-        "setTimeout(function(){busy=false;},80);},160);});})();</script>")
+        "<script>(function(){var firing=false,t=null;"
+        "function fire(){firing=true;window.dispatchEvent(new Event('resize'));firing=false;}"
+        "function settle(){if(firing)return;if(t)clearTimeout(t);"
+        "t=setTimeout(function(){t=null;requestAnimationFrame(function(){"
+        "fire();requestAnimationFrame(fire);});},150);}"
+        "window.addEventListener('resize',settle);"
+        "try{new ResizeObserver(settle).observe(document.documentElement);}catch(e){}"
+        "})();</script>")
 
     # Excel-style cell range selection + a Sum/Ø/Min/Max status bar.
     ui.add_body_html(_CELL_SELECT_JS)
