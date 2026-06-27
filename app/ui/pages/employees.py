@@ -12,6 +12,7 @@ from ...models.enums import PAYMENT_TERM_DE, SPLIT_MODEL_DE
 from ...engine.payroll_at import employee_year_cost, ruleset_for_year
 from ...services.recompute import recompute_all
 from ..formatting import MONTHS_DE, eur, page_title, years
+from ..grid import fit_grid
 from ..components.month_grid import editable_month_grid
 
 SONDER_MONTHS = (6, 11)
@@ -119,7 +120,7 @@ def render() -> None:
              "pinned": "left", "width": 150},
             {"headerName": "Funktion", "field": "function", "editable": True, "width": 180},
             {"headerName": "FTE", "field": "fte", "editable": True, "width": 70,
-             "type": "numericColumn"},
+             "type": "numericColumn", "suppressSizeToFit": True},
             {"headerName": "Extern", "field": "extern", "width": 80},
         ]
         rows = _load_rows(state["year"])
@@ -225,7 +226,7 @@ def render() -> None:
 
         # Deterministic height from row count (avoids autoHeight collapsing at 4K/high-DPI).
         grid_h = 34 + max(1, len(rows)) * 30 + 20
-        ui.aggrid({
+        ui.aggrid(fit_grid({
             "columnDefs": col_defs,
             "rowData": rows,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
@@ -233,7 +234,7 @@ def render() -> None:
             "headerHeight": 34,
             ":rowClassRules": "{'font-bold bg-blue-50': p => p.data._kind === 'subtotal',"
                               " 'font-semibold bg-gray-100': p => p.data._kind === 'section'}",
-        }).classes("w-full").style(f"height: {grid_h}px")
+        })).classes("w-full").style(f"height: {grid_h}px")
 
         ui.label(f"Jahr {year} — Brutto {eur(sum(tot_brutto))}  ·  Netto {eur(sum(tot_net))}  ·  "
                  f"Gesamtkosten {eur(sum(tot_allin))}  ·  Abgaben FA/ÖGK {eur(sum(tot_abg))}"

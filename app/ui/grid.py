@@ -1,0 +1,66 @@
+"""Shared ag-Grid sizing so values stay readable on every page.
+
+The problem this solves: value columns used to have fixed pixel widths, so on a
+wide window they bunched up on the left (empty space on the right, the pinned
+total column stranded far away), while on a narrow window they could shrink until
+the numbers were unreadable.
+
+`fit_grid()` rewrites every *value* column (a non-pinned `numericColumn`) to:
+
+- **flex** — share the available width, so the columns always fill the grid and
+  re-flow automatically when the window is resized (no `sizeColumnsToFit` needed);
+- **minWidth** — a readable floor derived from the *largest value actually in the
+  column*, so a big number widens its column instead of being clipped, and a
+  small window scrolls horizontally instead of crushing the cells.
+
+Pinned columns (labels on the left, totals on the right) and columns explicitly
+marked `suppressSizeToFit` keep their fixed widths.
+"""
+from __future__ import annotations
+
+# Readable floor for a money cell, and a rough character-width model used to grow
+# the floor so the widest value in a column is never truncated.
+_VALUE_FLOOR = 96     # px — comfortably fits values up to ~99.999 €
+_PX_PER_CHAR = 8      # px per glyph at the grid's font size
+_CELL_PADDING = 24    # px — left/right cell padding + a little headroom
+
+
+def _money_min_width(max_abs: float) -> int:
+    """A minWidth (px) that fits the widest de-DE formatted value in the column."""
+    n = abs(int(max_abs or 0))
+    digits = len(f"{n:,}")            # 1,234,567 → 9 chars, same as de-DE "1.234.567"
+    chars = digits + 2               # headroom for a " €" suffix or a leading sign
+    return max(_VALUE_FLOOR, chars * _PX_PER_CHAR + _CELL_PADDING)
+
+
+def fit_grid(options: dict) -> dict:
+    """Make value columns flex to fill the width with a readable minimum.
+
+    Mutates and returns the ag-Grid `options` dict so call sites can simply wrap
+    their literal: ``ui.aggrid(fit_grid({...}))``.
+    """
+    cols = options.get("columnDefs") or []
+    rows = (options.get("rowData") or []) + (options.get("pinnedBottomRowData") or [])
+    for col in cols:
+        field = col.get("field")
+        if not field or col.get("pinned") or col.get("suppressSizeToFit"):
+            continue
+        if col.get("type") != "numericColumn":
+            continue
+        max_abs = 0.0
+        for r in rows:
+            v = r.get(field)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                max_abs = max(max_abs, abs(v))
+        col["flex"] = 1
+        col["minWidth"] = _money_min_width(max_abs)
+        col.pop("width", None)       # let flex own the width
+
+    # flex already fills the grid and re-flows on resize; a sizeColumnsToFit
+    # handler or a global opt-out would fight it.
+    options.pop(":onGridSizeChanged", None)
+    options.pop("suppressSizeToFit", None)
+    default_col = options.get("defaultColDef")
+    if isinstance(default_col, dict):
+        default_col.pop("suppressSizeToFit", None)
+    return options

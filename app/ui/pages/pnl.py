@@ -14,6 +14,7 @@ from ...engine.scenarios import list_scenarios
 from ...models import Depreciation
 from ..components.scenario_ui import scenario_select
 from ..formatting import MONTHS_DE, eur, years
+from ..grid import fit_grid
 
 
 def _save_depreciation(year: int, month: int, amount) -> None:
@@ -65,12 +66,11 @@ def render() -> None:
                 d[f"s{sc.id}"] = round(match.annual) if match else 0
             row_data.append(d)
         ui.label("Szenarienvergleich (Jahreswerte)").classes("text-base font-semibold mt-4")
-        ui.aggrid({
+        ui.aggrid(fit_grid({
             "columnDefs": col_defs, "rowData": row_data,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
-            ":onGridSizeChanged": "params => params.api.sizeColumnsToFit()",
             "rowHeight": 30, "headerHeight": 34,
-        }).classes("w-full max-w-4xl").style(f"height: {34 + max(1, len(row_data)) * 30 + 20}px")
+        })).classes("w-full max-w-4xl").style(f"height: {34 + max(1, len(row_data)) * 30 + 20}px")
 
     @ui.refreshable
     def table() -> None:
@@ -103,16 +103,15 @@ def render() -> None:
             row_data.append(d)
 
         # Bold the subtotal/section rows via a rowClassRules on the hidden _kind field.
-        grid = ui.aggrid({
+        grid = ui.aggrid(fit_grid({
             "columnDefs": col_defs,
             "rowData": row_data,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
             ":getRowId": "params => params.data.label",
-            ":onGridSizeChanged": "params => params.api.sizeColumnsToFit()",
             ":rowClassRules": "{'font-bold bg-blue-50': p => p.data._kind === 'subtotal',"
                               " 'font-semibold': p => p.data._kind === 'section'}",
-        }).classes("w-full").style("height: calc(100vh - 300px); min-height: 360px")
+        })).classes("w-full").style("height: calc(100vh - 300px); min-height: 360px")
         state["grid"] = grid
         grid.on("cellValueChanged", _on_edit)
 
