@@ -5,7 +5,26 @@ from nicegui import ui
 
 from ..config import APP_TITLE
 from ..db import get_session, get_settings
+from ..version import __version__, APP_NAME, AUTHOR, LICENSE, REPO_URL
 from .pages import costs, employees, liquidity, pnl, revenue, scenarios, settings, snapshots
+
+
+def _about_dialog() -> None:
+    """Show app version, author (GitHub handle), repository and licence."""
+    with ui.dialog() as dlg, ui.card().classes("min-w-[360px] gap-1"):
+        ui.label(APP_NAME).classes("text-lg font-bold")
+        ui.label(f"Version {__version__}").classes("text-sm text-gray-600")
+        ui.separator().classes("my-1")
+        ui.label(f"Autor: {AUTHOR}").classes("text-sm")
+        with ui.row().classes("items-center gap-1 text-sm"):
+            ui.label("Projekt:")
+            ui.link(REPO_URL, REPO_URL, new_tab=True).classes("break-all")
+        ui.label(f"Lizenz: {LICENSE} — frei nutzbar, auch kommerziell.").classes("text-sm")
+        ui.label("Österreich-spezifisch (USt, Lohnverrechnung, Feiertage OÖ). "
+                 "Lokale App — keine Cloud. NiceGUI + SQLite.").classes(
+                     "text-xs text-gray-500 mt-1")
+        ui.button("Schließen", on_click=dlg.close).props("flat").classes("self-end mt-2")
+    dlg.open()
 
 # Excel-style cell selection + a status bar (Sum / Ø / Min / Max / Count).
 # ag-Grid range selection is an Enterprise feature, so this is a small Community
@@ -172,6 +191,9 @@ def index() -> None:
     with ui.header().props("dense").classes("items-center bg-primary"):
         ui.button(icon="menu", on_click=_toggle).props("flat color=white dense round")
         ui.label(f"{APP_TITLE} · {company}").classes("text-base font-bold text-white")
+        ui.space()
+        ui.button(icon="info", on_click=_about_dialog).props(
+            "flat color=white dense round").tooltip("Über / Version")
 
     # Hidden tab controller drives the panels; the sidebar sets its value.
     with ui.tabs().props("vertical").classes("hidden") as tabs:
