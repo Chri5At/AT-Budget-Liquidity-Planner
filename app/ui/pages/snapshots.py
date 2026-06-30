@@ -17,6 +17,7 @@ from ...services.snapshots import (
     snapshot_kpis,
 )
 from ..formatting import MONTHS_DE, eur, years
+from ..grid import fit_grid
 
 def _period_opts() -> dict[str, str]:
     """(year, month) range options for the export, e.g. '2026-07' -> 'Jul 2026'."""
@@ -202,11 +203,11 @@ def render() -> None:
         ]
         row_data = [{"k": k, "s": snp.get(k, 0), "c": cur.get(k, 0),
                      "d": cur.get(k, 0) - snp.get(k, 0)} for k in keys]
-        ui.aggrid({
+        ui.aggrid(fit_grid({
             "columnDefs": col_defs, "rowData": row_data,
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "rowHeight": 30, "headerHeight": 34,
-        }).classes("w-full max-w-3xl").style(f"height: {34 + len(row_data) * 30 + 20}px")
+        })).classes("w-full max-w-3xl").style(f"height: {34 + len(row_data) * 30 + 20}px")
 
         # Bar chart of the differences.
         ui.echart({

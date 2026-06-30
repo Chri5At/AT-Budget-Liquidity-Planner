@@ -21,6 +21,7 @@ from ...engine.scenarios import list_scenarios
 from ...models import Investment, Loan, LoanKind, LoanSchedule
 from ...services.recompute import recompute_all
 from ..formatting import eur, page_title
+from ..grid import fit_grid
 
 _LOAN_KIND_DE = {
     LoanKind.EU_FUNDING: "EU-Förderung / Zuschuss",
@@ -226,14 +227,12 @@ def render() -> None:
         rows_data.append(mk("total", "= Saldo", pivot.saldo))
         rows_data.append(mk("balance", "Bank Status", pivot.bank))
 
-        grid = ui.aggrid({
+        grid = ui.aggrid(fit_grid({
             "columnDefs": cols, "rowData": rows_data,
-            "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True,
-                              "suppressSizeToFit": True},
-            "suppressSizeToFit": True,
+            "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "rowHeight": 28, "headerHeight": 34,
             ":getRowId": "params => params.data.rid",
-        }).classes("w-full").style(f"height: {34 + len(rows_data) * 28 + 22}px")
+        })).classes("w-full").style(f"height: {34 + len(rows_data) * 28 + 22}px")
 
         def _toggle(e) -> None:
             a = e.args or {}

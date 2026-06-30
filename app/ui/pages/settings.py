@@ -1,12 +1,17 @@
 """Einstellungen — global planning parameters (split model, %, opening balance…)."""
 from __future__ import annotations
 
+import os
 from datetime import date
+from pathlib import Path
 
 from nicegui import ui
 from sqlalchemy import delete as sa_delete
 
+from ... import config
 from ...db import get_session, get_settings
+from ...services import data_io
+from ...version import __version__
 from ...models import (
     CashflowEntry,
     CostCategory,
@@ -102,6 +107,8 @@ def render() -> None:
 
     ui.label(f"Aktueller Anfangskontostand: {eur(data['opening_balance'])}").classes("text-sm mt-2")
 
+    _data_section()
+
     # --- Danger zone: wipe all data to start from scratch ----------------------
     with ui.card().classes("w-full max-w-3xl mt-4 border border-red-300"):
         ui.label("Gefahrenzone").classes("text-base font-semibold text-red-700")
@@ -110,6 +117,127 @@ def render() -> None:
                  "einer leeren Planung.").classes("text-sm text-gray-600")
         ui.button("Alle Daten löschen (leere Planung)", icon="delete_forever",
                   color="negative", on_click=_confirm_reset).props("outline")
+
+
+def _open_folder(path: Path) -> None:
+    try:
+        os.startfile(str(path))     # noqa: S606 — Windows Explorer on a known local path
+    except Exception:
+        pass
+
+
+def _export() -> None:
+    try:
+        path = data_io.export_zip()
+    except Exception as exc:        # noqa: BLE001 — surface any failure to the user
+        ui.notify(f"Export fehlgeschlagen: {exc}", type="negative")
+        return
+    ui.notify(f"Exportiert: {path.name}", type="positive")
+    _open_folder(path.parent)
+
+
+def _on_upload(e) -> None:
+    try:
+        raw = e.content.read()
+        manifest, payload = data_io.read_import(raw)
+    except ValueError as exc:
+        ui.notify(str(exc), type="negative")
+        return
+    except Exception as exc:        # noqa: BLE001
+        ui.notify(f"Datei konnte nicht gelesen werden: {exc}", type="negative")
+        return
+    _confirm_import(e.name, manifest, payload)
+
+
+def _confirm_import(fname: str, manifest: dict, payload: str) -> None:
+    rel = data_io.version_relation(manifest)
+    ver = manifest.get("app_version", "?")
+    with ui.dialog() as dlg, ui.card().classes("min-w-[380px]"):
+        ui.label("Daten importieren?").classes("text-lg font-bold")
+        ui.label(f"Datei: {fname}").classes("text-sm break-all")
+        ui.label(f"Erstellt mit App-Version {ver} · diese App: {__version__}").classes("text-sm")
+        if rel == "newer":
+            ui.label("Achtung: Die Datei stammt aus einer NEUEREN App-Version. Unbekannte "
+                     "Felder werden beim Import verworfen.").classes("text-sm text-red-700")
+        ui.label("Die aktuellen Daten werden ersetzt. Vorher wird automatisch eine "
+                 "Sicherung (Snapshot) erstellt.").classes("text-sm text-gray-600")
+        with ui.row().classes("justify-end w-full"):
+            ui.button("Abbrechen", on_click=dlg.close).props("flat")
+
+            def _do() -> None:
+                try:
+                    data_io.apply_import(payload)
+                except Exception as exc:    # noqa: BLE001
+                    ui.notify(f"Import fehlgeschlagen: {exc}", type="negative")
+                    dlg.close()
+                    return
+                dlg.close()
+                ui.notify("Daten importiert (Auto-Sicherung erstellt)", type="positive")
+                ui.navigate.reload()
+
+            ui.button("Importieren", icon="upload", color="primary", on_click=_do)
+    dlg.open()
+
+
+async def _browse(target) -> None:
+    """Best-effort native folder picker; falls back to manual entry in the browser."""
+    from nicegui import app, run
+    win = getattr(getattr(app, "native", None), "main_window", None)
+    if win is None:
+        ui.notify("Dateidialog nur in der App verfügbar — bitte Pfad eingeben.", type="info")
+        return
+    try:
+        import webview
+        res = await run.io_bound(win.create_file_dialog, webview.FOLDER_DIALOG)
+    except Exception:               # noqa: BLE001
+        ui.notify("Dateidialog nicht verfügbar — bitte Pfad eingeben.", type="info")
+        return
+    if res:
+        target.value = str(res[0] if isinstance(res, (list, tuple)) else res)
+
+
+def _change_dir(new_dir: str) -> None:
+    new_dir = (new_dir or "").strip()
+    if not new_dir:
+        ui.notify("Bitte ein Verzeichnis angeben", type="warning")
+        return
+    try:
+        _dst, copied = data_io.change_data_dir(new_dir)
+    except Exception as exc:        # noqa: BLE001
+        ui.notify(f"Konnte Speicherort nicht ändern: {exc}", type="negative")
+        return
+    msg = ("Datenbank in den neuen Ordner kopiert (Original bleibt als Sicherung)."
+           if copied else "Auf die vorhandene Datenbank im Zielordner umgestellt.")
+    ui.notify(f"Speicherort geändert. {msg}", type="positive")
+    ui.navigate.reload()
+
+
+def _data_section() -> None:
+    with ui.card().classes("w-full max-w-3xl mt-4"):
+        ui.label("Daten & Speicherort").classes("text-base font-semibold")
+        ui.label("Aktueller Speicherort der Datenbank:").classes("text-sm text-gray-600")
+        ui.label(str(config.DB_PATH)).classes("text-xs text-gray-700 break-all")
+
+        loc = ui.input("Datenverzeichnis", value=str(config.DATA_DIR)).props(
+            "outlined dense").classes("w-full")
+        with ui.row().classes("items-center gap-2"):
+            ui.button("Durchsuchen…", icon="folder_open",
+                      on_click=lambda: _browse(loc)).props("outline")
+            ui.button("Speicherort übernehmen", icon="drive_file_move",
+                      on_click=lambda: _change_dir(loc.value)).props("outline")
+        ui.label("Beim Wechsel wird die Datenbank in den neuen Ordner kopiert (sofern dort "
+                 "noch keine existiert); das Original bleibt als Sicherung erhalten."
+                 ).classes("text-xs text-gray-500")
+
+        ui.separator().classes("my-2")
+        ui.label("Sicherung & Übertragung").classes("text-sm font-medium")
+        with ui.row().classes("items-center gap-3"):
+            ui.button("Daten exportieren (ZIP)", icon="download", on_click=_export)
+            ui.upload(label="ZIP importieren", auto_upload=True, on_upload=_on_upload).props(
+                'accept=".zip" flat').classes("max-w-xs")
+        ui.label("Export legt eine ZIP-Sicherung im Ordner „exports“ ab (mit App-Version). "
+                 "Import ersetzt die aktuellen Daten — vorher wird automatisch ein Snapshot "
+                 "angelegt.").classes("text-xs text-gray-500")
 
 
 def _confirm_reset() -> None:

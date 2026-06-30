@@ -11,6 +11,7 @@ from collections.abc import Callable
 from nicegui import ui
 
 from ..formatting import MONTHS_DE
+from ..grid import fit_grid
 
 _MONEY_FMT = ("params => (params.value==null||params.value==='') ? '' : "
               "Number(params.value).toLocaleString('de-DE',{maximumFractionDigits:0})+' €'")
@@ -38,7 +39,7 @@ def editable_month_grid(rows: list[dict], lead_cols: list[dict],
         "cellClass": "font-bold",
     })
 
-    options = {
+    options = fit_grid({
         "columnDefs": col_defs,
         "rowData": rows,
         "defaultColDef": {"resizable": True, "sortable": False, "suppressMovable": True},
@@ -46,7 +47,7 @@ def editable_month_grid(rows: list[dict], lead_cols: list[dict],
         "stopEditingWhenCellsLoseFocus": True,
         "rowHeight": _ROW_H,
         "headerHeight": _HEADER_H,
-    }
+    })
     if fill_height:
         # Fill the remaining viewport height down to the bottom, scroll inside the grid.
         grid = ui.aggrid(options).classes("w-full").style("height: calc(100vh - 300px); min-height: 320px")

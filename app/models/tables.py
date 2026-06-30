@@ -43,6 +43,8 @@ class Settings(SQLModel, table=True):
     # True once demo data has been seeded (or the user cleared the DB on purpose),
     # so we never re-seed over an intentionally-empty database.
     seeded: bool = False
+    # App version that last opened/wrote this database (provenance; shown in About).
+    app_version: str = ""
 
 
 class Scenario(SQLModel, table=True):

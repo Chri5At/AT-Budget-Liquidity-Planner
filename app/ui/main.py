@@ -5,7 +5,26 @@ from nicegui import ui
 
 from ..config import APP_TITLE
 from ..db import get_session, get_settings
+from ..version import __version__, APP_NAME, AUTHOR, LICENSE, REPO_URL
 from .pages import costs, employees, liquidity, pnl, revenue, scenarios, settings, snapshots
+
+
+def _about_dialog() -> None:
+    """Show app version, author (GitHub handle), repository and licence."""
+    with ui.dialog() as dlg, ui.card().classes("min-w-[360px] gap-1"):
+        ui.label(APP_NAME).classes("text-lg font-bold")
+        ui.label(f"Version {__version__}").classes("text-sm text-gray-600")
+        ui.separator().classes("my-1")
+        ui.label(f"Autor: {AUTHOR}").classes("text-sm")
+        with ui.row().classes("items-center gap-1 text-sm"):
+            ui.label("Projekt:")
+            ui.link(REPO_URL, REPO_URL, new_tab=True).classes("break-all")
+        ui.label(f"Lizenz: {LICENSE} — frei nutzbar, auch kommerziell.").classes("text-sm")
+        ui.label("Österreich-spezifisch (USt, Lohnverrechnung, Feiertage OÖ). "
+                 "Lokale App — keine Cloud. NiceGUI + SQLite.").classes(
+                     "text-xs text-gray-500 mt-1")
+        ui.button("Schließen", on_click=dlg.close).props("flat").classes("self-end mt-2")
+    dlg.open()
 
 # Excel-style cell selection + a status bar (Sum / Ø / Min / Max / Count).
 # ag-Grid range selection is an Enterprise feature, so this is a small Community
@@ -136,7 +155,11 @@ def index() -> None:
         company = get_settings(s).company_name
     nav_state = {"mini": False}
 
-    drawer = (ui.left_drawer(value=True, fixed=True).props("bordered :width=210 :mini-width=60")
+    # behavior=desktop + breakpoint=0 stop Quasar from flipping the drawer into a
+    # mobile overlay (with a dimming backdrop) on narrow windows — in the packaged
+    # native window that state made the menu vanish with no way to reopen it.
+    drawer = (ui.left_drawer(value=True, fixed=True)
+              .props("bordered :width=210 :mini-width=60 behavior=desktop :breakpoint=0")
               .classes("bg-grey-1"))
 
     def _toggle() -> None:
@@ -147,13 +170,20 @@ def index() -> None:
         ui.run_javascript("[60,180,320,420].forEach(t => setTimeout("
                           "() => window.dispatchEvent(new Event('resize')), t));")
 
-    # After the user stops resizing the window, fire one clean resize so every
-    # ag-Grid does a final settled reflow (guards against recursion).
+    # Keep ag-Grids reflowed when the window changes size. The DOM 'resize' event
+    # alone is unreliable inside the packaged native window (WebView2 may skip it
+    # on resize / DPI change when dragging across monitors), so we also watch the
+    # document via a ResizeObserver. Both feed one debounced, settled resize that
+    # we dispatch across two animation frames to force a repaint + grid reflow.
     ui.add_body_html(
-        "<script>(function(){let busy=false;window.addEventListener('resize',function(){"
-        "if(busy)return;clearTimeout(window.__agReflow);window.__agReflow=setTimeout("
-        "function(){busy=true;window.dispatchEvent(new Event('resize'));"
-        "setTimeout(function(){busy=false;},80);},160);});})();</script>")
+        "<script>(function(){var firing=false,t=null;"
+        "function fire(){firing=true;window.dispatchEvent(new Event('resize'));firing=false;}"
+        "function settle(){if(firing)return;if(t)clearTimeout(t);"
+        "t=setTimeout(function(){t=null;requestAnimationFrame(function(){"
+        "fire();requestAnimationFrame(fire);});},150);}"
+        "window.addEventListener('resize',settle);"
+        "try{new ResizeObserver(settle).observe(document.documentElement);}catch(e){}"
+        "})();</script>")
 
     # Excel-style cell range selection + a Sum/Ø/Min/Max status bar.
     ui.add_body_html(_CELL_SELECT_JS)
@@ -161,6 +191,9 @@ def index() -> None:
     with ui.header().props("dense").classes("items-center bg-primary"):
         ui.button(icon="menu", on_click=_toggle).props("flat color=white dense round")
         ui.label(f"{APP_TITLE} · {company}").classes("text-base font-bold text-white")
+        ui.space()
+        ui.button(icon="info", on_click=_about_dialog).props(
+            "flat color=white dense round").tooltip("Über / Version")
 
     # Hidden tab controller drives the panels; the sidebar sets its value.
     with ui.tabs().props("vertical").classes("hidden") as tabs:

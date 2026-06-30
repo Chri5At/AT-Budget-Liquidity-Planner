@@ -22,6 +22,7 @@ from ...models import (
 from ...models.enums import PNL_LINE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
 from ..formatting import MONTHS_DE, eur, page_title, years
+from ..grid import fit_grid
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 
 CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
@@ -260,16 +261,15 @@ def render() -> None:
         bottom = {"rid": "grandtotal", "kind": "grandtotal", "name": "Σ Gesamt / Monat"}
         for m in range(1, 13):
             bottom[f"m{m}"] = sum(r[f"m{m}"] for r in rows if r["kind"] in ("category", "leaf"))
-        grid = ui.aggrid({
+        grid = ui.aggrid(fit_grid({
             "columnDefs": col_defs, "rowData": rows,
             "pinnedBottomRowData": [bottom],
             "defaultColDef": {"sortable": False, "resizable": True, "suppressMovable": True},
             "singleClickEdit": True, "stopEditingWhenCellsLoseFocus": True,
             "rowDragManaged": True, "animateRows": True, "rowHeight": 30, "headerHeight": 34,
             ":getRowId": "params => params.data.rid",
-            ":onGridSizeChanged": "params => params.api.sizeColumnsToFit()",
             ":getRowStyle": _ROW_STYLE,
-        }).classes("w-full").style(f"height: {34 + (max(1, len(rows)) + 1) * 30 + 20}px")
+        })).classes("w-full").style(f"height: {34 + (max(1, len(rows)) + 1) * 30 + 20}px")
         state["grid"] = grid
         grid.on("cellValueChanged", _on_cell_edit)
         grid.on("cellClicked", _on_cell_click)

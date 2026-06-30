@@ -4,11 +4,12 @@ from __future__ import annotations
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from .config import DB_URL
+from . import config
 from .models import Settings  # noqa: F401  (ensures all tables are imported/registered)
 from . import models as _models  # noqa: F401
+from .version import __version__
 
-engine = create_engine(DB_URL, echo=False)
+engine = create_engine(config.DB_URL, echo=False)
 
 
 def _add_column_if_missing(conn, table: str, column: str, ddl: str) -> None:
@@ -29,6 +30,7 @@ def _migrate() -> bool:
     added_special = False
     with engine.begin() as conn:
         _add_column_if_missing(conn, "settings", "seeded", "seeded BOOLEAN DEFAULT 0")
+        _add_column_if_missing(conn, "settings", "app_version", "app_version VARCHAR DEFAULT ''")
         # Scenario support: existing revenue/cost rows belong to the base scenario (id=1).
         _add_column_if_missing(conn, "revenuestream", "scenario_id",
                                "scenario_id INTEGER DEFAULT 1")
@@ -113,16 +115,38 @@ def init_db(seed: bool = True) -> None:
         _split_doubled_salaries()
     from .models import Scenario
     with Session(engine) as session:
-        if session.get(Settings, 1) is None:
-            session.add(Settings(id=1))
-            session.commit()
+        st = session.get(Settings, 1)
+        if st is None:
+            st = Settings(id=1)
+            session.add(st)
         if session.get(Scenario, 1) is None:
             session.add(Scenario(id=1, name="Basis", base_id=None, sort_order=0))
-            session.commit()
+        # Stamp the DB with the app version that last opened it (provenance).
+        if st.app_version != __version__:
+            st.app_version = __version__
+            session.add(st)
+        session.commit()
     if seed:
         from .seed import seed_if_empty
         with Session(engine) as session:
             seed_if_empty(session)
+
+
+def reload_engine() -> None:
+    """Rebuild the engine after the data directory changed (Settings → Daten).
+
+    Safe because every caller reaches the database through get_session()/
+    get_settings(), which read this module-level `engine` at call time — so
+    reassigning it here re-points the whole app at the new database file.
+    """
+    global engine
+    try:
+        engine.dispose()
+    except Exception:
+        pass
+    config.refresh_paths()
+    engine = create_engine(config.DB_URL, echo=False)
+    init_db(seed=False)
 
 
 def get_session() -> Session:

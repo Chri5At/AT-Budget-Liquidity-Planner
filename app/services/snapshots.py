@@ -82,14 +82,35 @@ def _coerce_dates(model, row: dict) -> dict:
 
 
 def _load_payload(session: Session, payload: str) -> None:
-    """Insert all rows from a snapshot payload into the given (empty) session."""
+    """Insert all rows from a snapshot/export payload into the given (empty) session.
+
+    Unknown keys are dropped so a payload exported by a *newer* app version (with
+    extra columns) still imports; missing columns fall back to the model defaults.
+    """
     data = json.loads(payload or "{}")
     by_name = {m.__name__: m for m in SNAPSHOT_MODELS}
     for name in (m.__name__ for m in SNAPSHOT_MODELS):
         model = by_name[name]
+        fields = set(model.model_fields)
         for row in data.get(name, []):
-            session.add(model(**_coerce_dates(model, row)))
+            known = {k: v for k, v in row.items() if k in fields}
+            session.add(model(**_coerce_dates(model, known)))
     session.commit()
+
+
+def dump_all(session: Session) -> str:
+    """Public JSON dump of every source table (used by the data export)."""
+    return _dump_payload(session)
+
+
+def replace_all_from_payload(session: Session, payload: str) -> None:
+    """Destructively replace the current plan with the payload, then rebuild cashflows."""
+    for m in reversed(SNAPSHOT_MODELS):   # children first
+        session.execute(sa_delete(m))
+    session.commit()
+    _load_payload(session, payload)
+    from ..engine.cashflow import build_cashflows
+    build_cashflows(session)
 
 
 def restore_snapshot(session: Session, snapshot_id: int) -> bool:
@@ -97,13 +118,7 @@ def restore_snapshot(session: Session, snapshot_id: int) -> bool:
     snap = session.get(Snapshot, snapshot_id)
     if snap is None:
         return False
-    payload = snap.payload
-    for m in reversed(SNAPSHOT_MODELS):   # children first
-        session.execute(sa_delete(m))
-    session.commit()
-    _load_payload(session, payload)
-    from ..engine.cashflow import build_cashflows
-    build_cashflows(session)
+    replace_all_from_payload(session, snap.payload)
     return True
 
 

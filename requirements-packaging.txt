@@ -1,0 +1,4 @@
+# Build-only dependencies for producing the Windows .exe (see packaging/build_exe.ps1).
+# Not needed to run the app from source.
+pyinstaller>=6.6
+pywebview>=5.1          # native desktop window backend (uses Edge WebView2 on Windows)

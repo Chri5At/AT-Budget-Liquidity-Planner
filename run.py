@@ -43,12 +43,23 @@ def _pick_free_port(preferred: int, span: int = 50) -> int:
     return preferred
 
 
+# A packaged (PyInstaller) build runs frozen; default it to a native desktop
+# window so the end user never sees a browser tab or a localhost URL.
+FROZEN = getattr(sys, "frozen", False)
+
 # --debug on the command line is shorthand for BL_DEBUG=1.
 DEBUG = "--debug" in sys.argv or _flag("BL_DEBUG", False)
 
 RELOAD = _flag("BL_RELOAD", DEBUG)        # debug implies auto-reload
-SHOW = _flag("BL_SHOW", True)
+NATIVE = _flag("BL_NATIVE", FROZEN)       # frozen → native window (needs pywebview)
+SHOW = _flag("BL_SHOW", True) and not NATIVE
 LOG_LEVEL = "debug" if DEBUG else "warning"
+
+# Frozen onefile launches from a temp dir; make relative runtime files (NiceGUI's
+# ".nicegui" storage) land in the writable per-user data folder, not %TEMP%.
+if FROZEN:
+    from app.config import DATA_DIR
+    os.chdir(DATA_DIR)
 
 # Pick a free port so a busy port never crashes the app. Auto-fallback is skipped
 # under auto-reload (the reloader re-binds the exact port itself).
@@ -63,11 +74,19 @@ if DEBUG:
     print(f"[run] DEBUG mode  port={PORT}  reload={RELOAD}  log={LOG_LEVEL}")
 print(f"[run] Starting on http://localhost:{PORT}")
 
-ui.run(
+run_kwargs = dict(
     title=APP_TITLE,
     port=PORT,
     reload=RELOAD,
     show=SHOW,
+    native=NATIVE,
     storage_secret="budget-liquidity-local",
     uvicorn_logging_level=LOG_LEVEL,
 )
+# Open the native window wide enough to start in desktop layout (the drawer
+# otherwise flips to a mobile overlay on a small initial window). window_size is
+# only valid in native mode — passing it would implicitly force native otherwise.
+if NATIVE:
+    run_kwargs["window_size"] = (1280, 820)
+
+ui.run(**run_kwargs)
