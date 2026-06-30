@@ -83,8 +83,7 @@ Diese eine Datei kannst du weitergeben — Python wird nicht benötigt.
   ausführen**. Das ist normal; ein Installer oder Zertifikat würde daran nichts
   ändern (die Reputation einer unsignierten Datei baut sich erst mit der Zeit auf).
 
-Das App-Icon (rot-weiß-rot mit steigendem Diagramm) wird von
-`packaging\make_icon.py` erzeugt. Vorgefertigte Releases können zusätzlich unter
+Vorgefertigte Releases können zusätzlich unter
 **[Releases](../../releases)** veröffentlicht werden.
 
 ## Reiter

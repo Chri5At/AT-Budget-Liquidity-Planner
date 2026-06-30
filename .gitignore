@@ -60,10 +60,6 @@ dist/
 # (keep *.spec — it is build source, not an artifact)
 # nicegui-pack regenerates this one from CLI flags on every build, so ignore it.
 /BudgetLiquidity.spec
-# Icon exploration outputs (the final icon.ico + icon_preview.png are kept)
-packaging/option_*.png
-packaging/contact_sheet.png
-packaging/compare_1to4.png
 # Installer outputs
 *.exe
 *.msi
