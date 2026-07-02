@@ -31,7 +31,32 @@ any third party.
 > Austria and is configurable). For other countries these rules would need to be
 > adapted.
 
-## Quick start (Windows)
+## ⬇️ Download & run (no setup — recommended)
+
+**Never used GitHub before? This is all you need — no Python, no installation.**
+
+1. Open the **[Releases page](https://github.com/Chri5At/AT-Budget-Liquidity-Planner/releases/latest)**.
+2. Under **Assets**, click **`BudgetLiquidity-1.0.0.exe`** — the download starts.
+   (If you only see a "Source code" zip, the `.exe` is hidden behind the small
+   **Assets ▸** triangle — click it to expand the list.)
+3. In your browser's downloads, **double-click** `BudgetLiquidity-1.0.0.exe`.
+4. Windows shows a blue **"Windows protected your PC"** box. This is normal — the
+   app is free and open-source but **not code-signed**. Click **More info**, then
+   the **Run anyway** button that appears.
+5. The app opens in its own window. On first launch it loads **fictional demo
+   data** so you can click around; replace it with your own numbers whenever you
+   like.
+
+That's it. It's a single file — nothing is installed, and **all your data stays
+on your computer**. To move it, just copy the `.exe` anywhere (Desktop is fine).
+
+> **Where is my data?** Your planning database lives in
+> `%LOCALAPPDATA%\BudgetLiquidity\` on your PC — never in the `.exe` and never in
+> the cloud. Back it up any time via **Einstellungen → Daten → Export (ZIP)**.
+
+---
+
+## For developers — run from source (Windows)
 
 ### Option A — Python + venv (standard)
 
@@ -64,10 +89,11 @@ free port if it is busy). On Windows you can also just double-click `start.bat`.
 
 > **Requirement:** Python **3.11 or newer**.
 
-## For non-technical users — standalone Windows `.exe`
+## Build the standalone `.exe` yourself (developers)
 
-Users without Python can run a **single self-contained `.exe`** that opens the app
-in its own native desktop window (no browser, no console). Build it yourself:
+The single self-contained `.exe` that end-users download (see
+[Download & run](#️-download--run-no-setup--recommended) above) is produced like
+this. Build it yourself to cut a new release:
 
 ```powershell
 # from the project root, with the .venv already created (see Quick start)
@@ -85,8 +111,6 @@ file to anyone — no Python required.
   "unrecognized app" prompt — click **More info → Run anyway**. This is expected;
   an installer or certificate would not change it (unsigned reputation builds up
   per version over time).
-
-Pre-built releases may also be published under **[Releases](../../releases)**.
 
 ## Tabs
 

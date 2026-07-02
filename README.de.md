@@ -25,7 +25,34 @@ an Dritte gesendet.
 > liegen ausschließlich in `data/planung.sqlite` und werden **nie** mit Git
 > eingecheckt (siehe `.gitignore`).
 
-## Schnellstart (Windows)
+## ⬇️ Herunterladen & starten (ohne Installation — empfohlen)
+
+**Noch nie GitHub benutzt? Mehr brauchst du nicht — kein Python, keine Installation.**
+
+1. Öffne die **[Releases-Seite](https://github.com/Chri5At/AT-Budget-Liquidity-Planner/releases/latest)**.
+2. Klicke unter **Assets** auf **`BudgetLiquidity-1.0.0.exe`** — der Download startet.
+   (Siehst du nur ein „Source code"-ZIP, ist die `.exe` hinter dem kleinen
+   Dreieck **Assets ▸** verborgen — draufklicken, um die Liste aufzuklappen.)
+3. Doppelklicke die heruntergeladene Datei `BudgetLiquidity-1.0.0.exe`.
+4. Windows zeigt ein blaues Fenster **„Der Computer wurde durch Windows
+   geschützt"**. Das ist normal — die App ist kostenlos und quelloffen, aber
+   **nicht signiert**. Klicke auf **Weitere Informationen** und dann auf den
+   erscheinenden Button **Trotzdem ausführen**.
+5. Die App öffnet sich in einem eigenen Fenster. Beim ersten Start werden
+   **fiktive Demo-Daten** geladen, damit du dich umsehen kannst; ersetze sie
+   jederzeit durch deine eigenen Zahlen.
+
+Fertig. Es ist eine einzige Datei — nichts wird installiert, und **alle deine
+Daten bleiben auf deinem Rechner**. Zum Verschieben kopierst du die `.exe`
+einfach irgendwohin (der Desktop reicht).
+
+> **Wo liegen meine Daten?** Deine Planungsdatenbank liegt unter
+> `%LOCALAPPDATA%\BudgetLiquidity\` auf deinem PC — nie in der `.exe` und nie in
+> der Cloud. Sichere sie jederzeit über **Einstellungen → Daten → Export (ZIP)**.
+
+---
+
+## Für Entwickler — aus dem Quellcode starten (Windows)
 
 ### Variante A — Python + venv (Standard)
 
@@ -59,11 +86,11 @@ Alternativ unter Windows: Doppelklick auf `start.bat`.
 
 > **Voraussetzung:** Python **3.11 oder neuer**.
 
-## Für Endnutzer ohne Python — eigenständige Windows-`.exe`
+## Die eigenständige `.exe` selbst bauen (für Entwickler)
 
-Anwender ohne Python können eine **einzelne, in sich geschlossene `.exe`**
-ausführen, die die App in einem eigenen Desktop-Fenster öffnet (kein Browser,
-keine Konsole). So baust du sie selbst:
+Die einzelne, in sich geschlossene `.exe`, die Endnutzer herunterladen (siehe
+[Herunterladen & starten](#️-herunterladen--starten-ohne-installation--empfohlen)
+oben), wird so erzeugt. Baue sie selbst, um ein neues Release zu schnüren:
 
 ```powershell
 # im Projektverzeichnis, mit bereits angelegtem .venv (siehe Schnellstart)
@@ -82,9 +109,6 @@ Diese eine Datei kannst du weitergeben — Python wird nicht benötigt.
   Warnung „unbekannte App" — klicke auf **Weitere Informationen → Trotzdem
   ausführen**. Das ist normal; ein Installer oder Zertifikat würde daran nichts
   ändern (die Reputation einer unsignierten Datei baut sich erst mit der Zeit auf).
-
-Vorgefertigte Releases können zusätzlich unter
-**[Releases](../../releases)** veröffentlicht werden.
 
 ## Reiter
 
