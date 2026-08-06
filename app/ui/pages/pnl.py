@@ -14,7 +14,7 @@ from ...engine.scenarios import list_scenarios
 from ...models import Depreciation
 from ..components.scenario_ui import scenario_select
 from ..formatting import MONTHS_DE, eur, years
-from ..grid import fit_grid
+from ..grid import DE_NUM_PARSER, fit_grid
 
 
 def _save_depreciation(year: int, month: int, amount) -> None:
@@ -86,7 +86,7 @@ def render() -> None:
             col_defs.append({"headerName": MONTHS_DE[m - 1], "field": f"m{m}",
                              "type": "numericColumn", "width": 90, "minWidth": 70,
                              ":editable": editable_month, ":cellStyle": editable_style,
-                             ":valueParser": "p => (p.newValue===''||p.newValue==null)?0:Number(p.newValue)",
+                             ":valueParser": DE_NUM_PARSER,
                              ":valueFormatter":
                              "p => (p.value? Math.round(p.value).toLocaleString('de-DE'):'')"})
         col_defs.append({"headerName": "Gesamt", "field": "jahr", "pinned": "right", "width": 130,

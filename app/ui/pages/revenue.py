@@ -16,7 +16,8 @@ from ...models import (
 from ...models.enums import REVENUE_PAY_ROUTINE_DE, REVENUE_TYPE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
 from ..formatting import MONTHS_DE, eur, page_title, years
-from ..grid import fit_grid
+from ..grid import DE_NUM_PARSER, fit_grid
+from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 
 # Routines that need a deposit field, and the one that needs Raten/Laufzeit.
@@ -27,7 +28,7 @@ CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
                "#f8d7da": "Rot", "#cfe2ff": "Blau", "#ffe5d0": "Orange", "#e2e3e5": "Grau"}
 
 # ag-Grid cell JS: numeric parser, per-cell colour, value + marker dot renderer.
-_CELL_PARSER = 'params => (params.newValue===""||params.newValue==null)?0:Number(params.newValue)'
+_CELL_PARSER = DE_NUM_PARSER
 # Month cells: category rows are bold (row colour comes from getRowStyle);
 # data cells get their own per-cell colour.
 _CELL_STYLE = (
@@ -518,8 +519,7 @@ def render() -> None:
 
             # (1) Single cell value at the top — used when no detail list is active.
             with ui.row().classes("items-center gap-3"):
-                single_in = ui.number("Einzelwert (€)", value=round(amount0), step=100,
-                                      ).props("dense outlined").classes("w-44")
+                single_in = AmountInput("Einzelwert (€)", value=amount0).classes("w-44")
                 use_list_sw = ui.switch("Detail-Aufstellung verwenden", value=has_list)
 
             # (2) Allgemeine Notiz, (3) Zellenfarbe
@@ -551,15 +551,15 @@ def render() -> None:
                                           on_change=lambda e, it=it: (it.__setitem__("qty", e.value or 0),
                                                                       _refresh_total())
                                           ).props("dense outlined").classes("w-24")
-                                ui.number("Preis", value=it["price"], step=1,
-                                          on_change=lambda e, it=it: (it.__setitem__("price", e.value or 0),
-                                                                      _refresh_total())
-                                          ).props("dense outlined").classes("w-28")
+                                AmountInput("Preis", value=it["price"],
+                                            on_amount_change=lambda v, it=it: (
+                                                it.__setitem__("price", v), _refresh_total())
+                                            ).classes("w-28")
                                 if is_project:
-                                    ui.number("Fixkosten (€)", value=it["fixed_fee"], step=100,
-                                              on_change=lambda e, it=it: (
-                                                  it.__setitem__("fixed_fee", e.value or 0), _refresh_total())
-                                              ).props("dense outlined").classes("w-32").tooltip(
+                                    AmountInput("Fixkosten (€)", value=it["fixed_fee"],
+                                                on_amount_change=lambda v, it=it: (
+                                                    it.__setitem__("fixed_fee", v), _refresh_total())
+                                                ).classes("w-32").tooltip(
                                         "Projektgebühr / Mob-Demob / Standby (Summe)")
                                 else:
                                     ui.label(f"= {eur((it['qty'] or 0) * (it['price'] or 0))}").classes(
@@ -568,10 +568,10 @@ def render() -> None:
                                          on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
                                          ).props("dense outlined").classes("w-48" if is_project else "w-64")
                             else:
-                                ui.number("Betrag", value=it["amount"], step=100,
-                                          on_change=lambda e, it=it: (it.__setitem__("amount", e.value or 0),
-                                                                      _refresh_total())
-                                          ).props("dense outlined").classes("w-32")
+                                AmountInput("Betrag", value=it["amount"],
+                                            on_amount_change=lambda v, it=it: (
+                                                it.__setitem__("amount", v), _refresh_total())
+                                            ).classes("w-32")
                                 ui.input("Notiz", value=it["note"],
                                          on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
                                          ).props("dense outlined").classes("w-80")
@@ -596,14 +596,14 @@ def render() -> None:
                               on_change=lambda e, it=it: it.__setitem__("pdays", int(e.value or 0))
                               ).props("dense outlined").classes("w-36").tooltip("Wann der Kunde zahlt")
                     ui.label("Subunternehmer:").classes("text-xs text-gray-500")
-                    ui.number("Satz/Turbine (€)", value=it["sub_rate"], min=0, step=10,
-                              on_change=lambda e, it=it: (it.__setitem__("sub_rate", e.value or 0),
-                                                          _refresh_total())
-                              ).props("dense outlined").classes("w-32")
-                    ui.number("Sub-Fix (€)", value=it["sub_fixed"], min=0, step=100,
-                              on_change=lambda e, it=it: (it.__setitem__("sub_fixed", e.value or 0),
-                                                          _refresh_total())
-                              ).props("dense outlined").classes("w-28").tooltip(
+                    AmountInput("Satz/Turbine (€)", value=it["sub_rate"],
+                                on_amount_change=lambda v, it=it: (
+                                    it.__setitem__("sub_rate", v), _refresh_total())
+                                ).classes("w-32")
+                    AmountInput("Sub-Fix (€)", value=it["sub_fixed"],
+                                on_amount_change=lambda v, it=it: (
+                                    it.__setitem__("sub_fixed", v), _refresh_total())
+                                ).classes("w-28").tooltip(
                         "Fixe Subunternehmer-Kosten (Standby, Mob-Demob, Setup)")
                     ui.number("Sub-Ziel (Tage)", value=it["sdays"], min=0, max=365, step=1,
                               on_change=lambda e, it=it: it.__setitem__("sdays", int(e.value or 0))
@@ -624,9 +624,9 @@ def render() -> None:
                                   on_change=lambda e, it=it: it.__setitem__("pdays", int(e.value or 0))
                                   ).props("dense outlined").classes("w-36")
                     if it["routine"] in _DEPOSIT_ROUTINES:
-                        ui.number("Anzahlung", value=it["dep_val"], min=0, step=1,
-                                  on_change=lambda e, it=it: it.__setitem__("dep_val", e.value or 0)
-                                  ).props("dense outlined").classes("w-28")
+                        AmountInput("Anzahlung", value=it["dep_val"],
+                                    on_amount_change=lambda v, it=it: it.__setitem__("dep_val", v)
+                                    ).classes("w-28")
                         ui.toggle({True: "%", False: "€"}, value=it["dep_pct"],
                                   on_change=lambda e, it=it: it.__setitem__("dep_pct", bool(e.value))
                                   ).props("dense")
@@ -675,7 +675,7 @@ def render() -> None:
                             _apply_cell_content(
                                 s, stream2, year, tm, use_list=use_list, items=items,
                                 note=note_in.value, color=modal["color"],
-                                single_value=single_in.value)
+                                single_value=single_in.amount)
                     recompute_all()
                     dlg.close()
                     matrix.refresh()

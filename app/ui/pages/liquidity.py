@@ -20,6 +20,7 @@ from ...engine.liquidity import (
 from ...engine.scenarios import list_scenarios
 from ...models import Investment, Loan, LoanKind, LoanSchedule
 from ...services.recompute import recompute_all
+from ..components.amount_input import AmountInput
 from ..formatting import eur, page_title
 from ..grid import fit_grid
 
@@ -414,7 +415,7 @@ def render() -> None:
             ui.label("Neues Investment / Kapitaleinlage").classes("text-lg font-bold")
             investor = ui.input("Investor (Person)").classes("w-72")
             label = ui.input("Bezeichnung / Zweck").classes("w-72")
-            amount = ui.number("Betrag (€)", value=0, step=1000, min=0).classes("w-40")
+            amount = AmountInput("Betrag (€)", value=0).classes("w-40")
             d = ui.input("Datum (YYYY-MM-DD)", value=date.today().isoformat()).classes("w-48")
             with ui.row():
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
@@ -430,7 +431,7 @@ def render() -> None:
                         return
                     with get_session() as s:
                         s.add(Investment(investor=investor.value, label=label.value or "",
-                                         amount=float(amount.value or 0), date=dd))
+                                         amount=amount.amount, date=dd))
                         s.commit()
                     dlg.close()
                     ui.notify("Investment hinzugefügt", type="positive")

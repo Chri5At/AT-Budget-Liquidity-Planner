@@ -1,10 +1,56 @@
 """Small formatting helpers for the German UI."""
 from __future__ import annotations
 
+import re
+
 from nicegui import ui
 
 MONTHS_DE = ["Jän", "Feb", "Mär", "Apr", "Mai", "Jun",
              "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+
+# "1.234" (one dot, groups of three) is a German thousands notation, not 1.234.
+_DE_THOUSANDS = re.compile(r"^-?\d{1,3}(\.\d{3})+$")
+
+
+def parse_de_amount(text: str | float | None) -> float | None:
+    """Parse a user-typed amount accepting German notation; None if unparseable.
+
+    German users type the dot as a thousands separator ("3.000" = 3000), but an
+    HTML number input hands it to us as a decimal point (3.0) — silently wrong by
+    a factor of 1000. So amounts are entered through text fields and parsed here:
+
+    - "3.000,50" / "3.000"  → dot = thousands, comma = decimal
+    - "3,5"                 → comma = decimal
+    - "3.5" / "3.14"        → a dot NOT forming groups of three stays a decimal
+    - "1.234.567"           → thousands
+    - "" / None             → None (caller decides the fallback)
+    """
+    if text is None:
+        return None
+    if isinstance(text, (int, float)):
+        return float(text)
+    s = text.strip().replace("€", "").replace(" ", "").replace(" ", "")
+    if not s:
+        return None
+    if "." in s and "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    elif _DE_THOUSANDS.match(s):
+        s = s.replace(".", "")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def fmt_amount(value: float | None) -> str:
+    """Number → editable text for an amount field: '3000' or '5,58' (no € suffix)."""
+    if value is None:
+        return ""
+    if float(value) == int(value):
+        return str(int(value))
+    return f"{value:.2f}".replace(".", ",")
 
 
 def years() -> list[int]:

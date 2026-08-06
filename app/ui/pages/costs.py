@@ -22,13 +22,14 @@ from ...models import (
 from ...models.enums import PNL_LINE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
 from ..formatting import MONTHS_DE, eur, page_title, years
-from ..grid import fit_grid
+from ..grid import DE_NUM_PARSER, fit_grid
+from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 
 CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
                "#f8d7da": "Rot", "#cfe2ff": "Blau", "#ffe5d0": "Orange", "#e2e3e5": "Grau"}
 
-_CELL_PARSER = 'params => (params.newValue===""||params.newValue==null)?0:Number(params.newValue)'
+_CELL_PARSER = DE_NUM_PARSER
 _CELL_STYLE = (
     'params => { if (params.data.kind === "category") return {fontWeight:"bold"};'
     ' if (params.data.kind === "grandtotal") return {fontWeight:"bold", backgroundColor:"#e2e8f0"};'
@@ -401,8 +402,7 @@ def render() -> None:
         with ui.dialog() as dlg, ui.card().classes("min-w-[640px]"):
             ui.label(f"{cname} — {MONTHS_DE[month - 1]} {year}").classes("text-lg font-bold")
             with ui.row().classes("items-center gap-3"):
-                single_in = ui.number("Einzelwert (€)", value=round(amount0), step=100
-                                      ).props("dense outlined").classes("w-44")
+                single_in = AmountInput("Einzelwert (€)", value=amount0).classes("w-44")
                 use_list_sw = ui.switch("Detail-Aufstellung verwenden", value=has_list)
             with ui.row().classes("items-center gap-3 mt-1"):
                 note_in = ui.input("Allgemeine Notiz", value=note0).classes("w-80")
@@ -419,10 +419,10 @@ def render() -> None:
             def lines() -> None:
                 for it in items:
                     with ui.row().classes("items-center gap-2"):
-                        ui.number("Betrag", value=it["amount"], step=100,
-                                  on_change=lambda e, it=it: (it.__setitem__("amount", e.value or 0),
-                                                              _refresh_total())
-                                  ).props("dense outlined").classes("w-32")
+                        AmountInput("Betrag", value=it["amount"],
+                                    on_amount_change=lambda v, it=it: (
+                                        it.__setitem__("amount", v), _refresh_total())
+                                    ).classes("w-32")
                         ui.input("Notiz", value=it["note"],
                                  on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
                                  ).props("dense outlined").classes("w-80")
@@ -470,7 +470,7 @@ def render() -> None:
                         for tm in targets:
                             _apply_cell_content(s, cat_id, year, tm, use_list=use_list, items=items,
                                                 note=note_in.value, color=modal["color"],
-                                                single_value=single_in.value)
+                                                single_value=single_in.amount)
                     recompute_all()
                     dlg.close()
                     matrix.refresh()
@@ -672,7 +672,7 @@ def render() -> None:
             new_name = ui.input("Name (falls neu)").classes("w-full")
             line = ui.select({l: PNL_LINE_DE[l] for l in PnlLine}, value=PnlLine.OPEX,
                              label="Bereich (falls neu)").classes("w-full")
-            amount = ui.number("Betrag je Monat (€)", value=0, step=100, min=0).classes("w-48")
+            amount = AmountInput("Betrag je Monat (€)", value=0).classes("w-48")
             with ui.row().classes("items-center gap-3"):
                 start_m = ui.select({m: MONTHS_DE[m - 1] for m in range(1, 13)}, value=1,
                                     label="Startmonat").props("dense outlined").classes("w-40")
@@ -682,7 +682,7 @@ def render() -> None:
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
                 def _do() -> None:
-                    a = float(amount.value or 0)
+                    a = amount.amount
                     s_m, e_m = int(start_m.value), int(end_m.value)
                     if e_m < s_m:
                         ui.notify("Endmonat vor Startmonat", type="warning")

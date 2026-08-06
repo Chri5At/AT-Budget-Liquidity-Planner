@@ -18,6 +18,19 @@ marked `suppressSizeToFit` keep their fixed widths.
 """
 from __future__ import annotations
 
+# German-aware amount parser for editable grid cells — the JS twin of
+# formatting.parse_de_amount (keep the two heuristics in sync). Plain
+# Number("3.000") would read a German thousands dot as a decimal point.
+DE_NUM_PARSER = (
+    "params => {"
+    " let s = String(params.newValue ?? '').trim().replace(/[€\\s\\u00a0]/g, '');"
+    " if (!s) return 0;"
+    " if (s.includes('.') && s.includes(',')) s = s.replace(/\\./g, '').replace(',', '.');"
+    " else if (s.includes(',')) s = s.replace(',', '.');"
+    " else if (/^-?\\d{1,3}(\\.\\d{3})+$/.test(s)) s = s.replace(/\\./g, '');"
+    " const n = Number(s);"
+    " return isNaN(n) ? 0 : n; }")
+
 # Readable floor for a money cell, and a rough character-width model used to grow
 # the floor so the widest value in a column is never truncated.
 _VALUE_FLOOR = 96     # px — comfortably fits values up to ~99.999 €

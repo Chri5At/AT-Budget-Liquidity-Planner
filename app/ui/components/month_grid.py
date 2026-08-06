@@ -11,11 +11,11 @@ from collections.abc import Callable
 from nicegui import ui
 
 from ..formatting import MONTHS_DE
-from ..grid import fit_grid
+from ..grid import DE_NUM_PARSER, fit_grid
 
 _MONEY_FMT = ("params => (params.value==null||params.value==='') ? '' : "
               "Number(params.value).toLocaleString('de-DE',{maximumFractionDigits:0})+' €'")
-_NUM_PARSER = "params => (params.newValue===''||params.newValue==null) ? 0 : Number(params.newValue)"
+_NUM_PARSER = DE_NUM_PARSER
 
 # Fixed grid metrics so the host height can be computed deterministically.
 _ROW_H = 30

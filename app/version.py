@@ -5,7 +5,7 @@ Bump it following SemVer (MAJOR.MINOR.PATCH) on every released build.
 """
 from __future__ import annotations
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 APP_NAME = "Budget- & Liquiditätsplanung"
 AUTHOR = "Chri5At"                       # GitHub handle (intentionally not a real name)

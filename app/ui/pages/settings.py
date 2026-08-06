@@ -28,6 +28,7 @@ from ...models import (
 )
 from ...models.enums import SPLIT_MODEL_DE
 from ...services.recompute import recompute_all
+from ..components.amount_input import AmountInput
 from ..formatting import eur
 
 # Source tables wiped by "Alle Daten löschen" (Settings is kept, flagged seeded).
@@ -67,7 +68,7 @@ def render() -> None:
             burden = ui.number("Lohnnebenkosten % (LNK)", value=data["employer_burden_pct"], step=1, min=0, max=100)
             netpct = ui.number("Netto % vom Brutto (Modell B)", value=data["salary_net_pct"], step=1, min=0, max=100)
             payday = ui.number("Abgaben-Zahltag (Folgemonat)", value=data["abgaben_pay_day"], step=1, min=1, max=28)
-            opening = ui.number("Anfangskontostand (€)", value=data["opening_balance"], step=1000)
+            opening = AmountInput("Anfangskontostand (€)", value=data["opening_balance"])
             opening_date = ui.input("Anfangsdatum (YYYY-MM-DD)", value=data["opening_balance_date"])
             hstart = ui.input("Planungsbeginn (YYYY-MM-DD)", value=data["horizon_start"])
             hend = ui.input("Planungsende (YYYY-MM-DD)", value=data["horizon_end"])
@@ -85,7 +86,7 @@ def render() -> None:
                 st.employer_burden_pct = float(burden.value or 0) / 100
                 st.salary_net_pct = float(netpct.value or 0) / 100
                 st.abgaben_pay_day = int(payday.value or 15)
-                st.opening_balance = float(opening.value or 0)
+                st.opening_balance = opening.amount
                 try:
                     st.opening_balance_date = date.fromisoformat(opening_date.value)
                     st.horizon_start = date.fromisoformat(hstart.value)
