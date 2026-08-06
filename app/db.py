@@ -69,6 +69,8 @@ def _migrate() -> bool:
         _add_column_if_missing(conn, "costcategory", "color", "color VARCHAR DEFAULT ''")
         _add_column_if_missing(conn, "costplanmonth", "note", "note VARCHAR DEFAULT ''")
         _add_column_if_missing(conn, "costplanmonth", "color", "color VARCHAR DEFAULT ''")
+        # CAPEX flag: cash + input VAT, but capitalised instead of expensed (AfA).
+        _add_column_if_missing(conn, "costcategory", "is_capex", "is_capex BOOLEAN DEFAULT 0")
         if "salarymonth" in inspect(conn).get_table_names():
             cols = {c["name"] for c in inspect(conn).get_columns("salarymonth")}
             if "special" not in cols:

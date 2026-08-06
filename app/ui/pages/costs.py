@@ -488,13 +488,13 @@ def render() -> None:
                 CostCategory.sort_order, CostCategory.id)).all() if c.scenario_id == state["scenario"]]
             cat_opts = {c.id: c.name for c in cats_all if c.is_category}
             data = [(c.id, c.name, c.pnl_line, c.opex_category, _cat_days(c), c.is_vatable,
-                     c.is_category, c.parent_id, c.color or "") for c in cats_all]
+                     c.is_capex, c.is_category, c.parent_id, c.color or "") for c in cats_all]
         with ui.expansion("Ausgaben & Kategorien bearbeiten (Bereich, Zahlungsziel, Kategorie, "
                           "löschen)", icon="tune").classes("w-full"):
             if not data:
                 ui.label("Keine eigenen Ausgaben in diesem Szenario.").classes(
                     "text-sm text-gray-500")
-            for cid, name, pl, opx, days, vat, is_cat, parent_id, color in data:
+            for cid, name, pl, opx, days, vat, capex, is_cat, parent_id, color in data:
                 with ui.row().classes("items-center gap-2"):
                     with ui.column().classes("gap-0"):
                         ui.button(icon="keyboard_arrow_up", on_click=lambda cid=cid: _move(cid, -1)
@@ -528,6 +528,11 @@ def render() -> None:
                               ).props("dense outlined").classes("w-24")
                     ui.checkbox("VSt", value=vat,
                                 on_change=lambda e, cid=cid: _save_field(cid, is_vatable=bool(e.value)))
+                    ui.checkbox("Anlage", value=capex,
+                                on_change=lambda e, cid=cid: _save_field(cid, is_capex=bool(e.value))
+                                ).tooltip("Anlagenzugang (CAPEX): zahlungswirksam inkl. Vorsteuer, "
+                                          "aber kein GuV-Aufwand — stattdessen AfA in der GuV-Zeile "
+                                          "„Abschreibungen“ eintragen.")
                     ui.button(icon="delete", on_click=lambda cid=cid, name=name, is_cat=is_cat:
                               _delete(cid, name, is_cat)
                               ).props("flat round dense color=negative").tooltip("löschen")

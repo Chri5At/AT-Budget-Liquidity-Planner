@@ -69,25 +69,31 @@ def pnl_view(session: Session, year: int, scenario_id: int = 1) -> list[PnlRow]:
         rev_by_stream.setdefault(rp.stream_id, _zeros())[rp.month - 1] += rp.amount
 
     # Costs by P&L line
-    material, cogs, external = _zeros(), _zeros(), _zeros()
+    # Two distinct sources of "bezogene Leistungen", shown as separate P&L rows:
+    #   external_sub — subcontractors booked inside project revenue cells (inspections)
+    #   external_cat — cost categories assigned to PnlLine.EXTERNAL_SERVICES
+    material, cogs = _zeros(), _zeros()
+    external_cat, external_sub = _zeros(), _zeros()
     opex_by_cat: dict[str, list[float]] = {}
     categories = {c.id: c for c in session.exec(select(CostCategory)).all()}
     for cp in session.exec(select(CostPlanMonth).where(CostPlanMonth.year == year)).all():
         cat = categories.get(cp.category_id)
         if cat is None or cp.category_id not in cost_ids or not month_in_horizon(year, cp.month, settings):
             continue
+        if cat.is_capex:
+            continue  # capitalised — reaches the P&L via AfA, not as an expense
         amt = abs(cp.amount)
         if cat.pnl_line == PnlLine.MATERIAL:
             material[cp.month - 1] += amt
         elif cat.pnl_line == PnlLine.COGS:
             cogs[cp.month - 1] += amt
         elif cat.pnl_line == PnlLine.EXTERNAL_SERVICES:
-            external[cp.month - 1] += amt
+            external_cat[cp.month - 1] += amt
         else:  # OPEX
             key = (cat.opex_category.value if cat.opex_category else OpexCategory.OTHER.value)
             opex_by_cat.setdefault(key, _zeros())[cp.month - 1] += amt
 
-    # Project subcontractor costs (embedded in revenue cells) → Bezogene Leistungen.
+    # Project subcontractor costs (embedded in revenue cells) → bezogene Inspektionen.
     for ce in session.exec(select(RevenueCellEntry).where(RevenueCellEntry.year == year)).all():
         if ce.stream_id not in rev_ids or not month_in_horizon(year, ce.month, settings):
             continue
@@ -96,7 +102,7 @@ def pnl_view(session: Session, year: int, scenario_id: int = 1) -> list[PnlRow]:
             continue
         sub = (ce.qty or 0) * (ce.sub_rate or 0) + (ce.sub_fixed or 0)
         if sub:
-            external[ce.month - 1] += sub
+            external_sub[ce.month - 1] += sub
 
     # Personnel (internal all-in vs external/contractor)
     personnel_int, personnel_ext = _zeros(), _zeros()
@@ -129,7 +135,7 @@ def pnl_view(session: Session, year: int, scenario_id: int = 1) -> list[PnlRow]:
     def add(*arrs: list[float]) -> list[float]:
         return [sum(col) for col in zip(*arrs)]
 
-    db1 = add(revenue, neg(material), neg(cogs), neg(external))
+    db1 = add(revenue, neg(material), neg(cogs), neg(external_sub), neg(external_cat))
     db2 = add(db1, neg(personnel_int), neg(personnel_ext))
     opex_total = add(*opex_by_cat.values()) if opex_by_cat else _zeros()
     ebitda = add(db2, neg(opex_total))
@@ -151,7 +157,8 @@ def pnl_view(session: Session, year: int, scenario_id: int = 1) -> list[PnlRow]:
     rows.append(PnlRow("2.  Material & bezogene Leistungen", _zeros(), kind="section"))
     rows.append(PnlRow("      − Material", neg(material), indent=1))
     rows.append(PnlRow("      − Wareneinsatz", neg(cogs), indent=1))
-    rows.append(PnlRow("      − Bezogene Leistungen on/offshore", neg(external), indent=1))
+    rows.append(PnlRow("      − Bezogene Inspektionsdienstleistungen", neg(external_sub), indent=1))
+    rows.append(PnlRow("      − Bezogene Leistungen", neg(external_cat), indent=1))
     rows.append(PnlRow("3.  = Deckungsbeitrag I", db1, kind="subtotal"))
 
     # 4. Personalaufwand

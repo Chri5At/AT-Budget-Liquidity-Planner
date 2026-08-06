@@ -48,6 +48,17 @@ from .revenue_terms import product_line_cashflows, project_line_cashflows
 from .scenarios import effective_cost_ids, effective_revenue_ids, get_scenario
 
 
+def _gross(amount: float, vatable: bool) -> float:
+    """Cash moves gross — invoices are paid incl. VAT.
+
+    Plan figures are entered net (they feed the P&L, which is a net view), but the
+    money that actually leaves/enters the account carries the VAT. The VAT part is
+    then settled with the Finanzamt via the UVA on the 15th of M+2, so it comes
+    back (or goes out) separately — see the VAT settlement block below.
+    """
+    return amount * (1.0 + VAT_RATE) if vatable else amount
+
+
 def build_cashflows(session: Session) -> int:
     """Wipe and rebuild the persisted CashflowEntry ledger (base scenario)."""
     entries = build_entries(session, scenario_id=1)
@@ -139,7 +150,8 @@ def build_entries(session: Session, scenario_id: int = 1) -> list[CashflowEntry]
                         rate_count=ln.rate_count, rate_months=ln.rate_months, subdiv=subdiv):
                     memo = stream.name + (f" · {bit.label}" if bit.label else "")
                     entries.append(CashflowEntry(
-                        date=bit.date, kind=CashflowKind.REVENUE_IN, amount=+bit.amount,
+                        date=bit.date, kind=CashflowKind.REVENUE_IN,
+                        amount=+_gross(bit.amount, stream.is_vatable),
                         source_kind="revenue", source_id=stream.id, memo=memo))
         elif stream.rtype == RevenueType.PROJECT and lines:
             # Each line: customer inflow at customer terms, subcontractor outflow at
@@ -153,12 +165,14 @@ def build_entries(session: Session, scenario_id: int = 1) -> list[CashflowEntry]
                     sub_days=sdays, subdiv=subdiv)
                 if pc.revenue:
                     entries.append(CashflowEntry(
-                        date=pc.revenue_date, kind=CashflowKind.REVENUE_IN, amount=+pc.revenue,
+                        date=pc.revenue_date, kind=CashflowKind.REVENUE_IN,
+                        amount=+_gross(pc.revenue, stream.is_vatable),
                         source_kind="revenue", source_id=stream.id,
                         memo=stream.name + (f" · {ln.note}" if ln.note else "")))
                 if pc.sub:
                     entries.append(CashflowEntry(
-                        date=pc.sub_date, kind=CashflowKind.COST_OUT, amount=-pc.sub,
+                        date=pc.sub_date, kind=CashflowKind.COST_OUT,
+                        amount=-_gross(pc.sub, stream.is_vatable),
                         source_kind="subcontractor", source_id=stream.id,
                         memo=f"{stream.name} · Subunternehmer"
                              + (f" ({ln.note})" if ln.note else "")))
@@ -167,7 +181,8 @@ def build_entries(session: Session, scenario_id: int = 1) -> list[CashflowEntry]
         else:
             cash = shift_by_days(last_day_of_month(rp.year, rp.month), stream_days, subdiv)
             entries.append(CashflowEntry(
-                date=cash, kind=CashflowKind.REVENUE_IN, amount=+rp.amount,
+                date=cash, kind=CashflowKind.REVENUE_IN,
+                amount=+_gross(rp.amount, stream.is_vatable),
                 source_kind="revenue", source_id=stream.id, memo=stream.name))
         # VAT settles on the invoice month regardless of collection timing.
         if stream.is_vatable:
@@ -186,7 +201,7 @@ def build_entries(session: Session, scenario_id: int = 1) -> list[CashflowEntry]
         cash = shift_by_days(inv, cdays, subdiv)
         kind = CashflowKind.COGS_OUT if cat.pnl_line == PnlLine.COGS else CashflowKind.COST_OUT
         entries.append(CashflowEntry(
-            date=cash, kind=kind, amount=-amount,
+            date=cash, kind=kind, amount=-_gross(amount, cat.is_vatable),
             source_kind="cost", source_id=cat.id, memo=cat.name))
         if cat.is_vatable:
             vat_by_month[(cp.year, cp.month)] -= amount * VAT_RATE

@@ -166,6 +166,10 @@ class CostCategory(SQLModel, table=True):
     payment_term: PaymentTerm = Field(default=PaymentTerm.NET30)
     payment_days: Optional[int] = None   # flexible Zahlungsziel in days; overrides payment_term
     is_vatable: bool = True
+    # CAPEX (Anlagenzugang): the money leaves the account and input VAT is reclaimed,
+    # but the purchase is NOT a P&L expense — it is capitalised and written off via
+    # AfA instead. Enter the AfA by hand in the editable "Abschreibungen" P&L row.
+    is_capex: bool = False
     sort_order: int = 0
     # Grouping (UI only), mirrors RevenueStream.
     is_category: bool = False
