@@ -15,7 +15,7 @@ from ...models import (
 )
 from ...models.enums import REVENUE_PAY_ROUTINE_DE, REVENUE_TYPE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
-from ..formatting import MONTHS_DE, eur, page_title, years
+from ..formatting import MONTHS_DE, eur, eur_exact, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
@@ -536,10 +536,10 @@ def render() -> None:
             def _refresh_total() -> None:
                 if is_project:
                     rev, sub = _total(), _sub_total()
-                    total_label.text = (f"Umsatz {eur(rev)}  ·  Subunternehmer −{eur(sub)}  ·  "
-                                        f"Netto-Marge {eur(rev - sub)}")
+                    total_label.text = (f"Umsatz {eur_exact(rev)}  ·  Subunternehmer −{eur_exact(sub)}"
+                                        f"  ·  Netto-Marge {eur_exact(rev - sub)}")
                 else:
-                    total_label.text = f"Summe Aufstellung: {eur(_total())}"
+                    total_label.text = f"Summe Aufstellung: {eur_exact(_total())}"
 
             @ui.refreshable
             def lines() -> None:

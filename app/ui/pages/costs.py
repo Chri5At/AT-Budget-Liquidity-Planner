@@ -21,7 +21,7 @@ from ...models import (
 )
 from ...models.enums import PNL_LINE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
-from ..formatting import MONTHS_DE, eur, page_title, years
+from ..formatting import MONTHS_DE, eur, eur_exact, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
@@ -413,7 +413,7 @@ def render() -> None:
             total_label = ui.label().classes("text-sm font-semibold")
 
             def _refresh_total() -> None:
-                total_label.text = f"Summe Aufstellung: {eur(_total())}"
+                total_label.text = f"Summe Aufstellung: {eur_exact(_total())}"
 
             @ui.refreshable
             def lines() -> None:

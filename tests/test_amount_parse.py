@@ -6,7 +6,7 @@ with these rules. The JS twin lives in app/ui/grid.py (DE_NUM_PARSER).
 """
 import pytest
 
-from app.ui.formatting import fmt_amount, parse_de_amount
+from app.ui.formatting import eur_exact, fmt_amount, parse_de_amount
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -44,6 +44,14 @@ def test_parse_valid(text, expected):
 @pytest.mark.parametrize("text", ["", "   ", None, "abc", "3..5", "1,2,3"])
 def test_parse_invalid_returns_none(text):
     assert parse_de_amount(text) is None
+
+
+def test_eur_exact_keeps_cents():
+    # 10,8 + 14,5 + 54,86 = 80,16 must NOT display as "80 €" in the detail sum
+    assert eur_exact(10.8 + 14.5 + 54.86) == "80,16 €"
+    assert eur_exact(80.0) == "80 €"
+    assert eur_exact(3270) == "3.270 €"
+    assert eur_exact(1234567.89) == "1.234.567,89 €"
 
 
 def test_fmt_amount_roundtrip():

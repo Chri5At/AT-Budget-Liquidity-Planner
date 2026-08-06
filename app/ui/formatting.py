@@ -77,3 +77,14 @@ def eur(value: float, decimals: int = 0) -> str:
     s = f"{value:,.{decimals}f}"           # 1,234,567.00
     s = s.replace(",", "§").replace(".", ",").replace("§", ".")
     return f"{s} €"
+
+
+def eur_exact(value: float) -> str:
+    """Like eur(), but keeps cents when the value has any: 80.16 -> '80,16 €'.
+
+    Used where users cross-check their own entries (e.g. the detail-list sum) —
+    the whole-euro rounding of the planning grids would look like a wrong sum.
+    """
+    if value is None:
+        return ""
+    return eur(value, 2 if abs(value - round(value)) > 1e-9 else 0)
