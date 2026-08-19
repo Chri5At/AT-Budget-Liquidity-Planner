@@ -54,7 +54,6 @@ _AMPEL_RENDER = (
     ' var c = m[params.value] || m.grey;'
     ' return "<span title=\'" + (params.data.ampel_hint || "") + "\'"'
     ' + " style=\'color:" + c + ";font-size:17px\'>&#9679;</span>"; }')
-_EUR_FMT = "p => p.value ? Math.round(p.value).toLocaleString('de-DE') + ' €' : ''"
 _ACTION_RENDER = ('params => params.value'
                   ' ? "<span style=\'cursor:pointer\'>" + params.value + "</span>" : ""')
 _ROW_STYLE = ('params => params.data.status === "aktiv" ? null'
@@ -285,6 +284,7 @@ def render():
     def _refresh_all() -> None:
         kpi_row.refresh()
         table.refresh()
+        locked_cells.refresh()
 
     # --- create / edit ------------------------------------------------------
 
@@ -488,8 +488,12 @@ def render():
             ui.button("Schließen", on_click=dlg.close).props("flat").classes("self-end")
         dlg.open()
 
+    @ui.refreshable
+    def locked_cells() -> None:
+        _locked_cells_hint()
+
     table()
-    _locked_cells_hint()
+    locked_cells()
     return _refresh_all
 
 
