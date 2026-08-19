@@ -10,7 +10,9 @@ from nicegui import ui
 from sqlmodel import select
 
 from ...db import get_session
+from ...engine.cost_cells import cell_plan_month, recompute_cell_amount
 from ...models import (
+    Contract,
     CostCategory,
     CostCellEntry,
     CostPlanMonth,
@@ -21,7 +23,7 @@ from ...models import (
 )
 from ...models.enums import PNL_LINE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
-from ..formatting import MONTHS_DE, eur, eur_exact, page_title, years
+from ..formatting import MONTHS_DE, eur, eur_exact, fmt_amount, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
@@ -62,43 +64,49 @@ def _bereich(c: CostCategory) -> str:
     return PNL_LINE_DE[c.pnl_line]
 
 
-def _cell_pm(s, cat_id: int, year: int, month: int) -> CostPlanMonth:
-    pm = s.exec(select(CostPlanMonth).where(
-        CostPlanMonth.category_id == cat_id, CostPlanMonth.year == year,
-        CostPlanMonth.month == month)).first()
-    if pm is None:
-        pm = CostPlanMonth(category_id=cat_id, year=year, month=month)
-        s.add(pm)
-    return pm
+# The cell amount / Σ-of-lines rule lives in engine.cost_cells so the contract
+# generator and this page agree on it; _cell_pm keeps the short local name.
+_cell_pm = cell_plan_month
+
+
+def _manual_entries(s, cat_id: int, year: int, month: int) -> list[CostCellEntry]:
+    """The hand-entered lines of a cell. Lines generated from a contract carry a
+    contract_id, belong to the Verträge & Abos tab and are never edited here."""
+    return list(s.exec(select(CostCellEntry).where(
+        CostCellEntry.category_id == cat_id, CostCellEntry.year == year,
+        CostCellEntry.month == month, CostCellEntry.contract_id == None)).all())  # noqa: E711
+
+
+def _generated_entries(s, cat_id: int, year: int, month: int) -> list[CostCellEntry]:
+    return list(s.exec(select(CostCellEntry).where(
+        CostCellEntry.category_id == cat_id, CostCellEntry.year == year,
+        CostCellEntry.month == month, CostCellEntry.contract_id != None).order_by(  # noqa: E711
+        CostCellEntry.sort_order, CostCellEntry.id)).all())
 
 
 def _recompute_cell(s, cat_id: int, year: int, month: int) -> None:
-    entries = s.exec(select(CostCellEntry).where(
-        CostCellEntry.category_id == cat_id, CostCellEntry.year == year,
-        CostCellEntry.month == month)).all()
-    pm = _cell_pm(s, cat_id, year, month)
-    pm.amount = sum(e.amount for e in entries)
-    s.commit()
+    recompute_cell_amount(s, cat_id, year, month)
 
 
 def _apply_cell_content(s, cat_id: int, year: int, month: int, *, use_list: bool,
                         items: list[dict], note: str, color: str, single_value) -> None:
-    for e in s.exec(select(CostCellEntry).where(
-            CostCellEntry.category_id == cat_id, CostCellEntry.year == year,
-            CostCellEntry.month == month)).all():
+    for e in _manual_entries(s, cat_id, year, month):
         s.delete(e)
+    generated = _generated_entries(s, cat_id, year, month)
     pm = _cell_pm(s, cat_id, year, month)
     if use_list:
         kept = [it for it in items if (it["amount"] or it["note"])]
+        start = len(generated)
         for i, it in enumerate(kept):
-            s.add(CostCellEntry(category_id=cat_id, year=year, month=month, sort_order=i,
+            s.add(CostCellEntry(category_id=cat_id, year=year, month=month,
+                                sort_order=start + i,
                                 amount=float(it["amount"] or 0), note=it["note"] or ""))
     else:
         pm.amount = float(single_value or 0)
     pm.note = note or ""
     pm.color = color or ""
     s.commit()
-    if use_list:
+    if use_list or generated:
         _recompute_cell(s, cat_id, year, month)
 
 
@@ -106,13 +114,14 @@ def _save_amount_cell(cat_id: int, year: int, month: int, amount: float) -> None
     # No recompute here — the cashflow ledger rebuilds when Liquidität opens, so
     # rapid cell edits stay instant without a page refresh.
     with get_session() as s:
-        for e in s.exec(select(CostCellEntry).where(
-                CostCellEntry.category_id == cat_id, CostCellEntry.year == year,
-                CostCellEntry.month == month)).all():
+        for e in _manual_entries(s, cat_id, year, month):
             s.delete(e)
         pm = _cell_pm(s, cat_id, year, month)
         pm.amount = float(amount or 0)
         s.commit()
+        if _generated_entries(s, cat_id, year, month):
+            # Contract-driven cell: its value is Σ of the lines, not a typed number.
+            _recompute_cell(s, cat_id, year, month)
 
 
 def _cat_month_total(s, cat_id: int, year: int, month: int) -> int:
@@ -388,22 +397,31 @@ def render() -> None:
             items = [{"amount": e.amount, "note": e.note}
                      for e in s.exec(select(CostCellEntry).where(
                          CostCellEntry.category_id == cat_id, CostCellEntry.year == year,
-                         CostCellEntry.month == month).order_by(
+                         CostCellEntry.month == month,
+                         CostCellEntry.contract_id == None).order_by(  # noqa: E711
                          CostCellEntry.sort_order, CostCellEntry.id)).all()]
+            # Lines written by the contract generator: shown, summed, but locked.
+            contract_names = {ct.id: ct.name for ct in s.exec(select(Contract)).all()}
+            generated = [(e.amount, e.note, contract_names.get(e.contract_id, "?"))
+                         for e in _generated_entries(s, cat_id, year, month)]
         if not items:
             items = [{"amount": 0.0, "note": ""}]
         modal = {"color": color0}
-        has_list = any((it["amount"] or it["note"]) for it in items)
+        has_list = bool(generated) or any((it["amount"] or it["note"]) for it in items)
         modal["use_list"] = has_list
+        gen_total = sum(a for a, _, _ in generated)
 
         def _total() -> float:
-            return sum((it["amount"] or 0) for it in items)
+            return gen_total + sum((it["amount"] or 0) for it in items)
 
         with ui.dialog() as dlg, ui.card().classes("min-w-[640px]"):
             ui.label(f"{cname} — {MONTHS_DE[month - 1]} {year}").classes("text-lg font-bold")
             with ui.row().classes("items-center gap-3"):
                 single_in = AmountInput("Einzelwert (€)", value=amount0).classes("w-44")
                 use_list_sw = ui.switch("Detail-Aufstellung verwenden", value=has_list)
+                if generated:
+                    # A contract drives this cell: its value is Σ of the lines.
+                    use_list_sw.disable()
             with ui.row().classes("items-center gap-3 mt-1"):
                 note_in = ui.input("Allgemeine Notiz", value=note0).classes("w-80")
                 ui.select(CELL_COLORS, value=color0, label="Zellenfarbe",
@@ -417,6 +435,15 @@ def render() -> None:
 
             @ui.refreshable
             def lines() -> None:
+                for amount, note, contract_name in generated:
+                    with ui.row().classes("items-center gap-2"):
+                        ui.icon("lock").classes("text-gray-400").tooltip(
+                            f"aus Vertrag „{contract_name}“ — im Tab Verträge & Abos bearbeiten")
+                        ui.input("Betrag", value=fmt_amount(amount)).props(
+                            "dense outlined readonly").classes("w-32")
+                        ui.input("Notiz", value=note).props(
+                            "dense outlined readonly").classes("w-80")
+                        ui.label("Vertrag").classes("text-xs text-gray-500")
                 for it in items:
                     with ui.row().classes("items-center gap-2"):
                         AmountInput("Betrag", value=it["amount"],
