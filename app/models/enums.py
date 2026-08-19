@@ -54,6 +54,22 @@ class CashflowKind(str, Enum):
     INVESTMENT_IN = "investment_in"   # capital paid in by an investor
 
 
+class BillingCycle(str, Enum):
+    """How often a contract/subscription is invoiced."""
+    MONTHLY = "monatlich"
+    QUARTERLY = "quartalsweise"
+    SEMIANNUAL = "halbjährlich"
+    YEARLY = "jährlich"
+    ONCE = "einmalig"
+
+
+class ContractStatus(str, Enum):
+    ACTIVE = "aktiv"
+    CANCELLED = "gekündigt"      # cancelled, but may still run (and be paid) until `end`
+    PAUSED = "ruhend"
+    TRIAL = "Testphase"
+
+
 class SplitModel(str, Enum):
     FIXED_PCT = "fixed_pct"     # model A: Abgaben = all_in * abgaben_pct
     ACCOUNTING = "accounting"   # model B: Abgaben = all_in - net(=gross*net_pct)
@@ -80,6 +96,15 @@ class RevenuePayRoutine(str, Enum):
     DEPOSIT_REST = "deposit_rest"  # Anzahlung sofort, Rest bei Lieferung
     INSTALLMENTS = "installments"  # Anzahlung sofort, Raten ab Lieferung
 
+
+# Months per billing interval. ONCE has no interval (a single due date).
+CYCLE_MONTHS = {
+    BillingCycle.MONTHLY: 1,
+    BillingCycle.QUARTERLY: 3,
+    BillingCycle.SEMIANNUAL: 6,
+    BillingCycle.YEARLY: 12,
+    BillingCycle.ONCE: 0,
+}
 
 TERM_DAYS = {
     PaymentTerm.SOFORT: 0,
@@ -123,3 +148,5 @@ REVENUE_PAY_ROUTINE_DE = {
     RevenuePayRoutine.DEPOSIT_REST: "Anzahlung sofort, Rest bei Lieferung",
     RevenuePayRoutine.INSTALLMENTS: "Ratenzahlung (Anzahlung + Raten)",
 }
+BILLING_CYCLE_DE = {c: c.value for c in BillingCycle}
+CONTRACT_STATUS_DE = {s: s.value for s in ContractStatus}

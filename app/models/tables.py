@@ -13,7 +13,9 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from .enums import (
+    BillingCycle,
     CashflowKind,
+    ContractStatus,
     LoanKind,
     OpexCategory,
     PaymentTerm,
@@ -191,7 +193,13 @@ class CostPlanMonth(SQLModel, table=True):
 
 class CostCellEntry(SQLModel, table=True):
     """One line of a cost cell's breakdown (the advanced modal). amount = Betrag.
-    The owning CostPlanMonth.amount is recomputed as the sum of its lines."""
+    The owning CostPlanMonth.amount is recomputed as the sum of its lines.
+
+    A line with `contract_id` set was GENERATED from a Contract (Verträge & Abos)
+    and is rebuilt on every recompute — it must not be edited by hand. Lines with
+    `contract_id is None` are the user's own entries and are never touched by the
+    generator; a cell may hold both kinds and simply sums them.
+    """
     id: Optional[int] = Field(default=None, primary_key=True)
     category_id: int = Field(foreign_key="costcategory.id", index=True)
     year: int
@@ -199,6 +207,40 @@ class CostCellEntry(SQLModel, table=True):
     sort_order: int = 0
     amount: float = 0.0
     note: str = ""
+    contract_id: Optional[int] = Field(default=None, foreign_key="contract.id", index=True)
+
+
+class Contract(SQLModel, table=True):
+    """A running contract / subscription / fixed cost (Verträge & Abos).
+
+    The register is the master record for a recurring obligation: from its billing
+    data the engine generates the plan cells in the target CostCategory (as
+    CostCellEntry lines tagged with this contract), and from its renewal data the
+    UI derives the next due date and the cancellation deadline.
+
+    Deliberately NOT scenario-aware: a contract is a real obligation. Which
+    scenarios it affects follows from its category (like any manually entered
+    cost), so there is no scenario_id here.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    partner: str = ""                     # Vertragspartner
+    contract_no: str = ""                 # Polizzen-/Vertrags-/Kundennummer
+    category_id: int = Field(foreign_key="costcategory.id", index=True)
+    amount: float = 0.0                   # per billing interval, entered like a plan cell
+    cycle: BillingCycle = Field(default=BillingCycle.MONTHLY)
+    start: date                           # Vertragsbeginn (= first due unless first_due is set)
+    first_due: Optional[date] = None      # first payment, if it differs from the start
+    end: Optional[date] = None            # None = unbefristet
+    auto_renew: bool = True               # stillschweigende Verlängerung
+    notice_months: int = 0                # Kündigungsfrist in months before the renewal date
+    renewal_day: Optional[int] = None     # Hauptfälligkeit — day (default: from `start`)
+    renewal_month: Optional[int] = None   # Hauptfälligkeit — month (default: from `start`)
+    payment_method: str = ""              # "SEPA-Lastschrift", "Kreditkarte", "Rechnung", …
+    status: ContractStatus = Field(default=ContractStatus.ACTIVE)
+    doc_path: str = ""                    # folder/file holding the paperwork
+    note: str = ""
+    sort_order: int = 0
 
 
 class Depreciation(SQLModel, table=True):
