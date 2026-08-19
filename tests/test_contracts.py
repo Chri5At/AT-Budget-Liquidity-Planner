@@ -495,3 +495,11 @@ def test_contracts_are_part_of_the_backup_payload():
     restored = list(target.exec(select(Contract)).all())
     assert [c.name for c in restored] == ["Drohnen-Haftpflicht"]
     assert _cells(target, restored[0].category_id) == {(2026, 8): 321.90, (2027, 8): 321.90}
+
+
+def test_a_passed_deadline_rolls_on_to_the_next_renewal():
+    """On the renewal day itself the notice window is gone — show the next one."""
+    s = _session()
+    c = _contract(s, _category(s))          # start/renewal 19.08., 3 months' notice
+    assert cancellation_deadline(c, date(2026, 8, 19)) == date(2027, 5, 19)
+    assert traffic_light(c, date(2026, 8, 19)) == "green"

@@ -128,9 +128,12 @@ def _row(contract: Contract, category_name: str, today: date) -> dict:
         "deadline": _de(deadline),
         "payment_method": contract.payment_method,
         "status": ContractStatus(contract.status).value,
-        "edit": "✎",
-        "doc": "📂" if contract.doc_path else "",
-        "del": "🗑",
+        "edit": "edit",
+        "hint_edit": "bearbeiten",
+        "doc": "folder_open" if contract.doc_path else "",
+        "hint_doc": f"Ablage öffnen: {contract.doc_path}",
+        "del": "delete",
+        "hint_del": "löschen",
     }
 
 
@@ -205,37 +208,37 @@ def render():
         col_defs = [
             {"headerName": "", "field": "ampel", "width": 46, "pinned": "left",
              "suppressSizeToFit": True, "sortable": True, ":cellRenderer": _AMPEL_RENDER},
-            {"headerName": "Vertrag", "field": "name", "width": 210, "pinned": "left",
+            {"headerName": "Vertrag", "field": "name", "width": 180, "pinned": "left",
              "suppressSizeToFit": True},
-            {"headerName": "Partner", "field": "partner", "width": 150,
+            {"headerName": "Partner", "field": "partner", "width": 130,
              "suppressSizeToFit": True},
-            {"headerName": "Vertrags-Nr.", "field": "contract_no", "width": 140,
+            {"headerName": "Vertrags-Nr.", "field": "contract_no", "width": 120,
              "suppressSizeToFit": True},
-            {"headerName": "Ausgaben-Position", "field": "category", "width": 160,
+            {"headerName": "Ausgaben-Position", "field": "category", "width": 140,
              "suppressSizeToFit": True},
             {"headerName": "Betrag", "field": "amount", "type": "numericColumn",
              ":valueFormatter": "p => p.value != null ? p.value.toLocaleString('de-DE',"
                                "{minimumFractionDigits:2, maximumFractionDigits:2}) + ' €' : ''"},
-            {"headerName": "Rhythmus", "field": "cycle", "width": 120,
+            {"headerName": "Rhythmus", "field": "cycle", "width": 100,
              "suppressSizeToFit": True},
             {"headerName": "€/Monat", "field": "monthly", "type": "numericColumn",
              ":valueFormatter": "p => p.value ? p.value.toLocaleString('de-DE',"
                                "{minimumFractionDigits:2, maximumFractionDigits:2}) + ' €' : ''"},
-            {"headerName": "nächste Fälligkeit", "field": "next_due", "width": 130,
+            {"headerName": "nächste Fälligkeit", "field": "next_due", "width": 112,
              "suppressSizeToFit": True},
-            {"headerName": "Hauptfälligkeit", "field": "renewal", "width": 120,
+            {"headerName": "Hauptfälligkeit", "field": "renewal", "width": 106,
              "suppressSizeToFit": True},
-            {"headerName": "Kündigungsstichtag", "field": "deadline", "width": 140,
+            {"headerName": "Kündigungsstichtag", "field": "deadline", "width": 122,
              "suppressSizeToFit": True},
-            {"headerName": "Zahlweg", "field": "payment_method", "width": 130,
+            {"headerName": "Zahlweg", "field": "payment_method", "width": 110,
              "suppressSizeToFit": True},
-            {"headerName": "Status", "field": "status", "width": 100,
+            {"headerName": "Status", "field": "status", "width": 86,
              "suppressSizeToFit": True},
-            {"headerName": "", "field": "edit", "width": 44, "pinned": "right",
+            {"headerName": "", "field": "edit", "width": 40, "pinned": "right",
              "sortable": False, "suppressSizeToFit": True, ":cellRenderer": _ACTION_RENDER},
-            {"headerName": "", "field": "doc", "width": 44, "pinned": "right",
+            {"headerName": "", "field": "doc", "width": 40, "pinned": "right",
              "sortable": False, "suppressSizeToFit": True, ":cellRenderer": _ACTION_RENDER},
-            {"headerName": "", "field": "del", "width": 44, "pinned": "right",
+            {"headerName": "", "field": "del", "width": 40, "pinned": "right",
              "sortable": False, "suppressSizeToFit": True, ":cellRenderer": _ACTION_RENDER},
         ]
         if not rows:
@@ -251,8 +254,9 @@ def render():
         grid.on("cellClicked", _on_click)
         grid.on("rowDoubleClicked", lambda e: _edit_dialog(int((e.args or {})
                                                               .get("data", {}).get("id", 0))))
-        ui.label("Doppelklick auf eine Zeile = bearbeiten · ✎ bearbeiten · 📂 Ablage öffnen · "
-                 "🗑 löschen. Die erzeugten Monatswerte stehen im Reiter Ausgaben."
+        ui.label("Doppelklick auf eine Zeile oder das Stift-Symbol = bearbeiten · "
+                 "Ordner-Symbol = Ablage öffnen · Papierkorb = löschen. Die erzeugten "
+                 "Monatswerte stehen im Reiter Ausgaben."
                  ).classes("text-xs text-gray-500")
 
     def _on_click(e) -> None:

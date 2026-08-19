@@ -177,13 +177,25 @@ def renewal_date(contract: Contract, today: date) -> date | None:
 
 
 def cancellation_deadline(contract: Contract, today: date) -> date | None:
-    """Last day to give notice: next renewal minus the notice period in months."""
+    """Last day to give notice: renewal date minus the notice period in months.
+
+    Returns the next deadline the user can still act on. Once this term's deadline
+    has passed the contract renews anyway, so the answer rolls on to the following
+    renewal — a date in the past would only tell the user something they can no
+    longer change.
+    """
     renewal = renewal_date(contract, today)
     if renewal is None:
         return None
-    if not contract.notice_months:
-        return renewal
-    return shift_months(renewal, -int(contract.notice_months))
+    notice = int(contract.notice_months or 0)
+    for _ in range(3):
+        deadline = shift_months(renewal, -notice) if notice else renewal
+        if deadline >= today:
+            return deadline
+        renewal = clamp_date(renewal.year + 1, renewal.month, renewal.day)
+        if contract.end is not None and renewal > contract.end:
+            return None
+    return None
 
 
 def days_until_deadline(contract: Contract, today: date) -> int | None:

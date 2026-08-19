@@ -750,3 +750,12 @@ def render() -> None:
 
     matrix()
     manage()
+
+    def _on_show() -> None:
+        # Contracts (Verträge & Abos) write cells into this grid, so re-read the
+        # data whenever the tab is opened instead of showing what was there when
+        # the page was first built.
+        matrix.refresh()
+        manage.refresh()
+
+    return _on_show
