@@ -118,6 +118,12 @@ def _fork_rows(session: Session, sc_id: int, base_id: int, model, plan_model,
         for c in session.exec(select(cell_model).where(getattr(cell_model, cell_fk) == r.id)).all():
             cd = c.model_dump(exclude={"id"})
             cd[cell_fk] = copy.id
+            # A scenario is an independent copy, so contract-generated lines become
+            # ordinary lines here: the contract keeps driving its own (base) row,
+            # while the scenario's copy stays editable instead of being wiped by the
+            # next run of the generator.
+            if "contract_id" in cd:
+                cd["contract_id"] = None
             session.add(cell_model(**cd))
     for r in base_rows:
         if r.parent_id and r.parent_id in id_map:

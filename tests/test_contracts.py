@@ -503,3 +503,30 @@ def test_a_passed_deadline_rolls_on_to_the_next_renewal():
     c = _contract(s, _category(s))          # start/renewal 19.08., 3 months' notice
     assert cancellation_deadline(c, date(2026, 8, 19)) == date(2027, 5, 19)
     assert traffic_light(c, date(2026, 8, 19)) == "green"
+
+
+# --- 9. scenarios ----------------------------------------------------------
+
+def test_a_forked_scenario_keeps_the_contract_amounts_as_its_own_lines():
+    """Forking copies the plan; the copy must survive the next generator run."""
+    from app.engine.scenarios import create_scenario
+    from app.models import Scenario
+
+    s = _session()
+    s.add(Scenario(id=1, name="Basis", base_id=None))
+    s.commit()
+    cat = _category(s)
+    _contract(s, cat)
+    generate_contract_cells(s)
+
+    scenario = create_scenario(s, "Sparvariante")
+    generate_contract_cells(s)
+
+    copies = [c for c in s.exec(select(CostCategory)).all()
+              if c.scenario_id == scenario.id]
+    assert len(copies) == 1
+    assert _cells(s, copies[0].id) == {(2026, 8): 321.90, (2027, 8): 321.90}
+    copied_lines = [line for line in _lines(s) if line.category_id == copies[0].id]
+    assert all(line.contract_id is None for line in copied_lines)   # editable there
+    # The base row is still driven by the contract.
+    assert _cells(s, cat.id) == {(2026, 8): 321.90, (2027, 8): 321.90}
