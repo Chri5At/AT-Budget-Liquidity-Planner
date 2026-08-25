@@ -315,9 +315,10 @@ def render():
                 no_in = ui.input("Vertrags-/Polizzennummer", value=values["contract_no"]
                                  ).props("dense outlined").classes("w-60")
             with ui.row().classes("gap-3 w-full items-center"):
-                cat_sel = ui.select(cats, value=(values["category_id"] if values["category_id"]
-                                                 in cats else next(iter(cats))),
-                                    label="Ausgaben-Position").props("dense outlined").classes("w-72")
+                cat_value = (values["category_id"] if values["category_id"] in cats
+                             else next(iter(cats)))
+                cat_sel = ui.select(cats, value=cat_value, label="Ausgaben-Position"
+                                    ).props("dense outlined").classes("w-72")
                 amount_in = AmountInput("Betrag je Intervall (€)",
                                         value=values["amount"]).classes("w-48")
                 cycle_sel = ui.select({c.value: c.value for c in BillingCycle},
@@ -337,13 +338,14 @@ def render():
             with ui.row().classes("gap-3 w-full items-center"):
                 renew_cb = ui.checkbox("Stillschweigende Verlängerung",
                                        value=bool(values["auto_renew"]))
-                notice_in = ui.number("Kündigungsfrist (Monate)", value=values["notice_months"],
-                                      min=0, max=36, step=1).props("dense outlined").classes("w-44")
+                notice_in = ui.number("Kündigungsfrist (Monate)", min=0, max=36, step=1,
+                                      value=values["notice_months"]
+                                      ).props("dense outlined").classes("w-44")
                 day_in = ui.number("Hauptfälligkeit Tag", value=values["renewal_day"],
                                    min=1, max=31, step=1).props("dense outlined").classes("w-40")
-                month_sel = ui.select({0: "— aus Beginn —",
-                                       **{m: MONTHS_DE[m - 1] for m in range(1, 13)}},
-                                      value=values["renewal_month"] or 0,
+                months = {0: "— aus Beginn —",
+                          **{m: MONTHS_DE[m - 1] for m in range(1, 13)}}
+                month_sel = ui.select(months, value=values["renewal_month"] or 0,
                                       label="Hauptfälligkeit Monat"
                                       ).props("dense outlined").classes("w-44")
             ui.label("Hauptfälligkeit leer lassen = Jahrestag des Beginns. "

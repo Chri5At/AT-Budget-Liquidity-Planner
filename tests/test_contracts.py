@@ -57,9 +57,9 @@ def _category(s: Session, name: str = "Versicherungen") -> CostCategory:
 
 
 def _contract(s: Session, category: CostCategory, **kw) -> Contract:
-    data = dict(name="Drohnen-Haftpflicht", partner="R+V", category_id=category.id,
-                amount=321.90, cycle=BillingCycle.YEARLY, start=date(2026, 8, 19),
-                notice_months=3)
+    data = dict(name="Betriebshaftpflicht (Demo)", partner="Musterversicherung AG",
+                category_id=category.id, amount=320.00, cycle=BillingCycle.YEARLY,
+                start=date(2026, 8, 19), notice_months=3)
     data.update(kw)
     c = Contract(**data)
     s.add(c)
@@ -145,11 +145,11 @@ def test_month_end_days_are_clamped_not_dropped():
 def test_generator_writes_one_cell_per_due_date():
     s = _session()
     cat = _category(s)
-    _contract(s, cat)                       # 321,90 € yearly, 19.08.
+    _contract(s, cat)                       # 320 € yearly, 19.08.
     written = generate_contract_cells(s)
 
     assert written == 2
-    assert _cells(s, cat.id) == {(2026, 8): 321.90, (2027, 8): 321.90}
+    assert _cells(s, cat.id) == {(2026, 8): 320.00, (2027, 8): 320.00}
     assert all(line.contract_id is not None for line in _lines(s))
 
 
@@ -166,7 +166,7 @@ def test_generating_twice_changes_nothing():
     after = [(line.category_id, line.year, line.month, line.amount, line.note)
              for line in _lines(s)]
     assert after == before
-    assert _cells(s, cat.id) == {(2026, 8): 321.90, (2027, 8): 321.90}
+    assert _cells(s, cat.id) == {(2026, 8): 320.00, (2027, 8): 320.00}
 
 
 def test_manual_line_in_the_same_cell_survives_and_is_summed():
@@ -182,7 +182,7 @@ def test_manual_line_in_the_same_cell_survives_and_is_summed():
 
     manual = [line for line in _lines(s) if line.contract_id is None]
     assert [(m.amount, m.note) for m in manual] == [(100.0, "Selbstbehalt")]
-    assert _cells(s, cat.id)[(2026, 8)] == 421.90
+    assert _cells(s, cat.id)[(2026, 8)] == 420.00
 
 
 def test_a_typed_cell_value_is_kept_as_a_manual_line():
@@ -197,7 +197,7 @@ def test_a_typed_cell_value_is_kept_as_a_manual_line():
 
     manual = [line for line in _lines(s) if line.contract_id is None]
     assert [m.amount for m in manual] == [50.0]
-    assert _cells(s, cat.id)[(2026, 8)] == 371.90
+    assert _cells(s, cat.id)[(2026, 8)] == 370.00
 
 
 def test_deleting_the_contract_removes_its_cells_only():
@@ -261,7 +261,7 @@ def test_cancelled_keeps_paying_until_its_end_date():
 
     generate_contract_cells(s)
 
-    assert _cells(s, cat.id) == {(2026, 1): 321.90, (2026, 2): 321.90, (2026, 3): 321.90}
+    assert _cells(s, cat.id) == {(2026, 1): 320.00, (2026, 2): 320.00, (2026, 3): 320.00}
 
 
 def test_cancelled_without_an_end_date_generates_nothing():
@@ -383,10 +383,10 @@ def test_snapshot_roundtrip_keeps_contracts_and_their_cells():
 
     restored = list(s.exec(select(Contract)).all())
     assert [(c.name, c.amount, c.contract_no) for c in restored] == \
-           [("Drohnen-Haftpflicht", 321.90, "")]
+           [("Betriebshaftpflicht (Demo)", 320.00, "")]
     assert restored[0].start == date(2026, 8, 19)
     category_id = restored[0].category_id
-    assert _cells(s, category_id) == {(2026, 8): 321.90, (2027, 8): 321.90}
+    assert _cells(s, category_id) == {(2026, 8): 320.00, (2027, 8): 320.00}
     assert all(line.contract_id == restored[0].id for line in _lines(s))
 
 
@@ -404,14 +404,14 @@ def test_a_contract_flows_through_pnl_and_liquidity_like_any_cost():
     cat.payment_term = PaymentTerm.SOFORT
     s.add(cat)
     s.commit()
-    _contract(s, cat)                       # 321,90 € yearly, due 19.08.
+    _contract(s, cat)                       # 320 € yearly, due 19.08.
 
     generate_contract_cells(s)
     build_cashflows(s)
 
     # P&L: the premium hits the month it is due, nothing is spread over the year.
     ebitda = next(r for r in pnl_view(s, 2026) if "EBITDA" in r.label).values
-    assert round(ebitda[7], 2) == -321.90                    # August
+    assert round(ebitda[7], 2) == -320.00                    # August
     assert all(round(v, 2) == 0.0 for i, v in enumerate(ebitda) if i != 7)
 
     # Liquidity: paid gross at the category's payment term, VAT reclaimed later.
@@ -419,11 +419,11 @@ def test_a_contract_flows_through_pnl_and_liquidity_like_any_cost():
     out = [e for e in entries if e.kind == CashflowKind.COST_OUT and e.date.year == 2026]
     vat = [e for e in entries if e.kind == CashflowKind.AUTHORITY_VAT and e.date.year == 2026]
     assert len(out) == 1
-    assert round(out[0].amount, 2) == -round(321.90 * (1 + VAT_RATE), 2)
+    assert round(out[0].amount, 2) == -round(320.00 * (1 + VAT_RATE), 2)
     assert out[0].date == date(2026, 8, 31)                  # month end, a Monday
-    assert round(vat[0].amount, 2) == round(321.90 * VAT_RATE, 2)
+    assert round(vat[0].amount, 2) == round(320.00 * VAT_RATE, 2)
     # 2026 nets out to the two premiums (2026 + 2027 VAT settles in 2027/2028).
-    assert round(sum(e.amount for e in entries), 2) == -round(321.90 * 2, 2)
+    assert round(sum(e.amount for e in entries), 2) == -round(320.00 * 2, 2)
 
 
 # --- 8. additive JSON import ----------------------------------------------
@@ -488,13 +488,13 @@ def test_contracts_are_part_of_the_backup_payload():
     s = _session()
     _contract(s, _category(s))
     payload = dump_all(s)
-    assert json.loads(payload)["Contract"][0]["name"] == "Drohnen-Haftpflicht"
+    assert json.loads(payload)["Contract"][0]["name"] == "Betriebshaftpflicht (Demo)"
 
     target = _session()
     replace_all_from_payload(target, payload)
     restored = list(target.exec(select(Contract)).all())
-    assert [c.name for c in restored] == ["Drohnen-Haftpflicht"]
-    assert _cells(target, restored[0].category_id) == {(2026, 8): 321.90, (2027, 8): 321.90}
+    assert [c.name for c in restored] == ["Betriebshaftpflicht (Demo)"]
+    assert _cells(target, restored[0].category_id) == {(2026, 8): 320.00, (2027, 8): 320.00}
 
 
 def test_a_passed_deadline_rolls_on_to_the_next_renewal():
@@ -525,8 +525,8 @@ def test_a_forked_scenario_keeps_the_contract_amounts_as_its_own_lines():
     copies = [c for c in s.exec(select(CostCategory)).all()
               if c.scenario_id == scenario.id]
     assert len(copies) == 1
-    assert _cells(s, copies[0].id) == {(2026, 8): 321.90, (2027, 8): 321.90}
+    assert _cells(s, copies[0].id) == {(2026, 8): 320.00, (2027, 8): 320.00}
     copied_lines = [line for line in _lines(s) if line.category_id == copies[0].id]
     assert all(line.contract_id is None for line in copied_lines)   # editable there
     # The base row is still driven by the contract.
-    assert _cells(s, cat.id) == {(2026, 8): 321.90, (2027, 8): 321.90}
+    assert _cells(s, cat.id) == {(2026, 8): 320.00, (2027, 8): 320.00}
