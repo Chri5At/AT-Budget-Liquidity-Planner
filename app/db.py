@@ -71,6 +71,9 @@ def _migrate() -> bool:
         _add_column_if_missing(conn, "costplanmonth", "color", "color VARCHAR DEFAULT ''")
         # CAPEX flag: cash + input VAT, but capitalised instead of expensed (AfA).
         _add_column_if_missing(conn, "costcategory", "is_capex", "is_capex BOOLEAN DEFAULT 0")
+        # Verträge & Abos: cell lines generated from a Contract carry its id (the
+        # `contract` table itself is created by create_all). NULL = entered by hand.
+        _add_column_if_missing(conn, "costcellentry", "contract_id", "contract_id INTEGER")
         if "salarymonth" in inspect(conn).get_table_names():
             cols = {c["name"] for c in inspect(conn).get_columns("salarymonth")}
             if "special" not in cols:

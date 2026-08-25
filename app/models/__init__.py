@@ -1,6 +1,11 @@
 """Model package — re-exports enums and tables for convenient imports."""
 from .enums import (  # noqa: F401
+    BillingCycle,
+    BILLING_CYCLE_DE,
     CashflowKind,
+    ContractStatus,
+    CONTRACT_STATUS_DE,
+    CYCLE_MONTHS,
     LoanKind,
     LOAN_KIND_DE,
     OpexCategory,
@@ -19,6 +24,7 @@ from .enums import (  # noqa: F401
 from .tables import (  # noqa: F401
     ActualValue,
     CashflowEntry,
+    Contract,
     CostCategory,
     CostCellEntry,
     CostPlanMonth,

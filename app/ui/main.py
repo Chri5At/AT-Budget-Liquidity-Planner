@@ -6,7 +6,8 @@ from nicegui import ui
 from ..config import APP_TITLE
 from ..db import get_session, get_settings
 from ..version import __version__, APP_NAME, AUTHOR, LICENSE, REPO_URL
-from .pages import costs, employees, liquidity, pnl, revenue, scenarios, settings, snapshots
+from .pages import (contracts, costs, employees, liquidity, pnl, revenue, scenarios,
+                    settings, snapshots)
 
 
 def _about_dialog() -> None:
@@ -141,6 +142,7 @@ _NAV = [
     ("emp", "groups", "Mitarbeiter", employees.render),
     ("rev", "trending_up", "Einnahmen", revenue.render),
     ("cost", "trending_down", "Ausgaben", costs.render),
+    ("con", "receipt_long", "Verträge & Abos", contracts.render),
     ("pnl", "table_chart", "GuV / Budget", pnl.render),
     ("liq", "account_balance", "Liquidität", liquidity.render),
     ("scn", "alt_route", "Szenarien", scenarios.render),

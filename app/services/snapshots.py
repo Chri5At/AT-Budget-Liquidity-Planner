@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from ..models import (
+    Contract,
     CostCategory,
     CostCellEntry,
     CostPlanMonth,
@@ -38,7 +39,7 @@ SNAPSHOT_MODELS = [
     Settings, Scenario, ScenarioDisable,
     Employee, SalaryMonth,
     RevenueStream, RevenuePlanMonth, RevenueCellEntry,
-    CostCategory, CostPlanMonth, CostCellEntry,
+    CostCategory, Contract, CostPlanMonth, CostCellEntry,
     Depreciation, Investment, Loan, LoanSchedule,
 ]
 
@@ -110,6 +111,8 @@ def replace_all_from_payload(session: Session, payload: str) -> None:
     session.commit()
     _load_payload(session, payload)
     from ..engine.cashflow import build_cashflows
+    from ..engine.contracts import generate_contract_cells
+    generate_contract_cells(session)
     build_cashflows(session)
 
 

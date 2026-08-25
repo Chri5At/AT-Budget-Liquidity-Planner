@@ -118,6 +118,15 @@ Diese eine Datei kannst du weitergeben — Python wird nicht benötigt.
   mit Zahlungsziel.
 - **Kosten** — Kostenkategorien je P&L-Zuordnung (Material / Wareneinsatz /
   bezogene Leistungen / OPEX).
+- **Verträge & Abos** — Register aller laufenden Verträge, Abos und Fixkosten.
+  Ein Vertrag wird einmal erfasst (Betrag je Intervall, Rhythmus, Beginn/Ende,
+  Kündigungsfrist); daraus entstehen die Monatszellen in der zugeordneten
+  Ausgaben-Position — die Jahresprämie landet im Fälligkeitsmonat, in jedem
+  Planjahr, ohne sie erneut einzutippen. Eine Ampel warnt vor dem
+  Kündigungsstichtag (gelb ab 120, rot ab 60 Tagen), die KPI-Zeile zeigt die
+  normalisierten Fixkosten je Monat und Jahr. Erzeugte Zellen sind im Reiter
+  Ausgaben schreibgeschützt; händisch erfasste Werte derselben Zelle bleiben
+  erhalten und werden dazugezählt.
 - **GuV / Budget** — Deckungsbeitragsrechnung (DB I/II, EBITDA, EBIT, EBT),
   automatisch berechnet.
 - **Liquidität** — Geldfluss in 15.-/Monatsende-Buckets mit laufendem

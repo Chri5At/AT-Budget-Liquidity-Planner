@@ -121,6 +121,15 @@ file to anyone — no Python required.
   one-off) with payment terms.
 - **Kosten** (Costs) — cost categories by P&L line (materials / cost of goods /
   external services / OPEX).
+- **Verträge & Abos** (Contracts & subscriptions) — a register of running
+  contracts, subscriptions and fixed costs. Enter a contract once (amount per
+  billing interval, rhythm, start/end, notice period) and its plan cells are
+  generated in the assigned cost row — a yearly insurance premium lands in the
+  month it is due, every planning year, without retyping. A traffic light warns
+  before the cancellation deadline (yellow 120, red 60 days ahead), and the KPI
+  row shows the normalised fixed costs per month and per year. The generated
+  cells are read-only in the Kosten tab; hand-entered values in the same cell
+  are kept and added.
 - **GuV / Budget** (P&L) — contribution-margin statement (CM I/II, EBITDA, EBIT,
   EBT), calculated automatically.
 - **Liquidität** (Liquidity) — cash flow in 15th-of-month / month-end buckets
