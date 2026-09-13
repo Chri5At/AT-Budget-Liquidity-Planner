@@ -14,12 +14,24 @@ from ...models import (
     ScenarioDisable,
 )
 from ...models.enums import REVENUE_PAY_ROUTINE_DE, REVENUE_TYPE_DE, TERM_DAYS
+from ...engine.revenue_cells import cell_total, uses_qty_price
 from ...services.recompute import recompute_all
+from ...services.vat_convert import (
+    conversion_factor,
+    convert_revenue_values,
+    revenue_value_count,
+)
 from ..formatting import MONTHS_DE, eur, eur_exact, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
-from ..components.vat_hint import amount_label, vat_banner, vat_flag_tooltip, vat_hint_text
+from ..components.vat_hint import (
+    amount_label,
+    vat_banner,
+    vat_flag_tooltip,
+    vat_flip_dialog,
+    vat_hint_text,
+)
 
 _VAT_WHERE = ("Umschalten: Haken „USt“ unter „Einnahmen bearbeiten“ am Ende des "
               "Reiters Einnahmen.")
@@ -63,14 +75,8 @@ def _stream_days(st: RevenueStream) -> int:
     return st.payment_days if st.payment_days is not None else TERM_DAYS[st.payment_term]
 
 
-# Types whose breakdown lines are entered as Menge × Preis (qty × price) rather
-# than a plain Betrag. Recurring income often has a price per unit (e.g. per sync)
-# with a different quantity each month; projects are turbines × price + fees.
-_QTY_PRICE_TYPES = (RevenueType.PRODUCT, RevenueType.RECURRING, RevenueType.PROJECT)
-
-
-def _uses_qty_price(rtype: RevenueType) -> bool:
-    return rtype in _QTY_PRICE_TYPES
+# Menge × Preis vs. plain Betrag — the rule lives in engine/revenue_cells.
+_uses_qty_price = uses_qty_price
 
 
 def _cell_pm(s, stream_id: int, year: int, month: int) -> RevenuePlanMonth:
@@ -88,16 +94,7 @@ def _recompute_cell(s, stream: RevenueStream, year: int, month: int) -> None:
     entries = s.exec(select(RevenueCellEntry).where(
         RevenueCellEntry.stream_id == stream.id, RevenueCellEntry.year == year,
         RevenueCellEntry.month == month)).all()
-    if stream.rtype == RevenueType.PROJECT:
-        # Project income = turbines × price + fixed fees (subcontractor is a cost).
-        total = sum(e.qty * e.price + e.fixed_fee for e in entries)
-        units = sum(e.qty for e in entries)
-    elif _uses_qty_price(stream.rtype):
-        total = sum(e.qty * e.price for e in entries)
-        units = sum(e.qty for e in entries)
-    else:
-        total = sum(e.amount for e in entries)
-        units = 0.0
+    total, units = cell_total(stream.rtype, entries)
     pm = _cell_pm(s, stream.id, year, month)
     pm.amount = total
     pm.units = units
@@ -744,7 +741,8 @@ def render() -> None:
                               on_change=lambda e, sid=sid: _save_field(sid, payment_days=int(e.value or 0))
                               ).props("dense outlined").classes("w-28")
                     ui.checkbox("USt", value=vat,
-                                on_change=lambda e, sid=sid: _save_field(sid, is_vatable=bool(e.value))
+                                on_change=lambda e, sid=sid, name=name: _toggle_vat(
+                                    sid, name, bool(e.value))
                                 ).tooltip(vat_flag_tooltip("revenue"))
                     ui.button(icon="delete", on_click=lambda sid=sid, name=name, is_cat=is_cat:
                               _delete_stream(sid, name, is_cat)
@@ -769,6 +767,33 @@ def render() -> None:
             s.commit()
         matrix.refresh()
         manage.refresh()
+
+    def _toggle_vat(sid: int, name: str, new_flag: bool) -> None:
+        """Flip USt; if the stream already holds values, ask whether to convert them."""
+        with get_session() as s:
+            st = s.get(RevenueStream, sid)
+            if st is None or bool(st.is_vatable) == new_flag:
+                return
+            n = revenue_value_count(s, sid)
+        if not n:
+            _save_field(sid, is_vatable=new_flag)
+            return
+
+        def _convert() -> None:
+            with get_session() as s:
+                convert_revenue_values(s, sid, conversion_factor(new_flag))
+            _save_field(sid, is_vatable=new_flag)
+            matrix.refresh()
+            manage.refresh()
+            ui.notify(f"{n} Werte umgerechnet und USt {'ein' if new_flag else 'aus'}geschaltet",
+                      type="positive")
+
+        def _keep() -> None:
+            _save_field(sid, is_vatable=new_flag)
+            manage.refresh()
+
+        vat_flip_dialog(name, new_flag, n, side="revenue", on_convert=_convert,
+                        on_keep=_keep, on_cancel=manage.refresh)
 
     def _save_field(sid: int, **kw) -> None:
         with get_session() as s:

@@ -81,3 +81,39 @@ def vat_banner(is_vatable: bool, *, side: str = "cost",
             if where_to_change:
                 ui.label(where_to_change).classes("text-xs opacity-70")
     return box
+
+
+def vat_flip_dialog(name: str, new_is_vatable: bool, n_values: int, *, side: str = "cost",
+                    on_convert, on_keep, on_cancel) -> None:
+    """Ask what to do with existing values when a position's VAT flag is flipped.
+
+    Flipping the flag changes how the engine reads every stored figure (netto vs.
+    Zahlbetrag) without changing the figures themselves. The user decides:
+    convert them (keeps their meaning), keep them (they were typed the new way
+    already), or cancel (flag stays as it was).
+    """
+    flag = "USt" if side == "revenue" else "VSt"
+    was, now = ("exkl.", "inkl.") if not new_is_vatable else ("inkl.", "exkl.")
+    op = f"÷ {1 + VAT_RATE:.1f}".replace(".", ",") if new_is_vatable \
+        else f"× {1 + VAT_RATE:.1f}".replace(".", ",")
+    with ui.dialog() as dlg, ui.card().classes("min-w-[560px]"):
+        ui.label(f"{flag} für „{name}“ {'einschalten' if new_is_vatable else 'ausschalten'}"
+                 ).classes("text-lg font-bold")
+        ui.label(f"Für diese Position sind bereits {n_values} Werte erfasst. Bisher galten sie "
+                 f"als {was} MwSt., ab jetzt liest die App sie als {now} MwSt. — die Zahlen "
+                 "selbst ändert der Haken nicht.").classes("text-sm")
+        vat_banner(new_is_vatable, side=side)
+        ui.label(f"Umrechnen ({op}) hält die Bedeutung der Werte bei: aus einem bisherigen "
+                 f"{was}-Betrag wird der passende {now}-Betrag. „Beibehalten“ lässt die "
+                 f"Zahlen stehen, falls sie ohnehin schon {now} MwSt. eingetragen sind."
+                 ).classes("text-xs text-gray-600")
+
+        def _do(fn) -> None:
+            dlg.close()
+            fn()
+
+        with ui.row().classes("mt-3 gap-2"):
+            ui.button("Abbrechen", on_click=lambda: _do(on_cancel)).props("flat")
+            ui.button("Werte beibehalten", on_click=lambda: _do(on_keep)).props("outline")
+            ui.button(f"Umrechnen ({op})", icon="calculate", on_click=lambda: _do(on_convert))
+    dlg.open()

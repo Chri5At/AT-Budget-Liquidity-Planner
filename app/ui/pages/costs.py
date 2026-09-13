@@ -23,11 +23,18 @@ from ...models import (
 )
 from ...models.enums import PNL_LINE_DE, TERM_DAYS
 from ...services.recompute import recompute_all
+from ...services.vat_convert import conversion_factor, convert_cost_values, cost_value_count
 from ..formatting import MONTHS_DE, eur, eur_exact, fmt_amount, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
-from ..components.vat_hint import amount_label, vat_banner, vat_flag_tooltip, vat_hint_text
+from ..components.vat_hint import (
+    amount_label,
+    vat_banner,
+    vat_flag_tooltip,
+    vat_flip_dialog,
+    vat_hint_text,
+)
 
 CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
                "#f8d7da": "Rot", "#cfe2ff": "Blau", "#ffe5d0": "Orange", "#e2e3e5": "Grau"}
@@ -564,7 +571,8 @@ def render() -> None:
                               on_change=lambda e, cid=cid: _save_field(cid, payment_days=int(e.value or 0))
                               ).props("dense outlined").classes("w-24")
                     ui.checkbox("VSt", value=vat,
-                                on_change=lambda e, cid=cid: _save_field(cid, is_vatable=bool(e.value))
+                                on_change=lambda e, cid=cid, name=name: _toggle_vat(
+                                    cid, name, bool(e.value))
                                 ).tooltip(vat_flag_tooltip("cost"))
                     ui.checkbox("Anlage", value=capex,
                                 on_change=lambda e, cid=cid: _save_field(cid, is_capex=bool(e.value))
@@ -592,6 +600,32 @@ def render() -> None:
             s.commit()
         matrix.refresh()
         manage.refresh()
+
+    def _toggle_vat(cid: int, name: str, new_flag: bool) -> None:
+        """Flip VSt; if the position already holds values, ask whether to convert them."""
+        with get_session() as s:
+            c = s.get(CostCategory, cid)
+            if c is None or bool(c.is_vatable) == new_flag:
+                return
+            n = cost_value_count(s, cid)
+        if not n:
+            _save_field(cid, is_vatable=new_flag)
+            return
+
+        def _convert() -> None:
+            with get_session() as s:
+                convert_cost_values(s, cid, conversion_factor(new_flag))
+            _save_field(cid, is_vatable=new_flag)
+            manage.refresh()
+            ui.notify(f"{n} Werte umgerechnet und VSt {'ein' if new_flag else 'aus'}geschaltet",
+                      type="positive")
+
+        def _keep() -> None:
+            _save_field(cid, is_vatable=new_flag)
+            manage.refresh()
+
+        vat_flip_dialog(name, new_flag, n, side="cost", on_convert=_convert, on_keep=_keep,
+                        on_cancel=manage.refresh)
 
     def _save_field(cid: int, **kw) -> None:
         with get_session() as s:
