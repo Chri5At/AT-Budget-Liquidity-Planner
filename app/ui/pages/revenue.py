@@ -19,6 +19,10 @@ from ..formatting import MONTHS_DE, eur, eur_exact, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
+from ..components.vat_hint import amount_label, vat_banner, vat_flag_tooltip, vat_hint_text
+
+_VAT_WHERE = ("Umschalten: Haken „USt“ unter „Einnahmen bearbeiten“ am Ende des "
+              "Reiters Einnahmen.")
 
 # Routines that need a deposit field, and the one that needs Raten/Laufzeit.
 _DEPOSIT_ROUTINES = (RevenuePayRoutine.DEPOSIT_REST, RevenuePayRoutine.INSTALLMENTS)
@@ -358,6 +362,10 @@ def render() -> None:
         ui.label("Einfachklick = Wert · Doppelklick = Detail/Notiz/Farbe · Klick auf ▶/▼ = "
                  "Kategorie auf/zu · Ziehen am Griff ⠿ = Reihenfolge / in Kategorie verschieben"
                  ).classes("text-xs text-gray-500")
+        ui.label("Beträge: exkl. MwSt. (netto) bei Einnahmen mit USt-Haken — der Kunde zahlt "
+                 "brutto, die USt geht ans Finanzamt; ohne USt-Haken inkl. MwSt. (= Zahlungs"
+                 "eingang, z. B. Reverse Charge). Der Haken sitzt unter „Einnahmen bearbeiten“."
+                 ).classes("text-xs text-gray-500")
         base_toggle_panel(state["scenario"], "revenue", RevenueStream, matrix.refresh)
 
     def _cell_col(args) -> str:
@@ -467,6 +475,7 @@ def render() -> None:
             is_project = stream.rtype == RevenueType.PROJECT
             qty_mode = _uses_qty_price(stream.rtype)   # Menge × Preis lines
             sname = stream.name
+            vat0 = bool(stream.is_vatable)
             default_days = _stream_days(stream)
             pm = s.exec(select(RevenuePlanMonth).where(
                 RevenuePlanMonth.stream_id == stream_id, RevenuePlanMonth.year == year,
@@ -516,10 +525,12 @@ def render() -> None:
 
         with ui.dialog() as dlg, ui.card().classes("min-w-[760px]"):
             ui.label(f"{sname} — {MONTHS_DE[month - 1]} {year}").classes("text-lg font-bold")
+            vat_banner(vat0, side="revenue", where_to_change=_VAT_WHERE)
 
             # (1) Single cell value at the top — used when no detail list is active.
             with ui.row().classes("items-center gap-3"):
-                single_in = AmountInput("Einzelwert (€)", value=amount0).classes("w-44")
+                single_in = AmountInput(amount_label("Einzelwert", vat0),
+                                        value=amount0).classes("w-52")
                 use_list_sw = ui.switch("Detail-Aufstellung verwenden", value=has_list)
 
             # (2) Allgemeine Notiz, (3) Zellenfarbe
@@ -551,15 +562,15 @@ def render() -> None:
                                           on_change=lambda e, it=it: (it.__setitem__("qty", e.value or 0),
                                                                       _refresh_total())
                                           ).props("dense outlined").classes("w-24")
-                                AmountInput("Preis", value=it["price"],
+                                AmountInput(amount_label("Preis", vat0), value=it["price"],
                                             on_amount_change=lambda v, it=it: (
                                                 it.__setitem__("price", v), _refresh_total())
-                                            ).classes("w-28")
+                                            ).classes("w-40")
                                 if is_project:
-                                    AmountInput("Fixkosten (€)", value=it["fixed_fee"],
+                                    AmountInput(amount_label("Fixkosten", vat0), value=it["fixed_fee"],
                                                 on_amount_change=lambda v, it=it: (
                                                     it.__setitem__("fixed_fee", v), _refresh_total())
-                                                ).classes("w-32").tooltip(
+                                                ).classes("w-40").tooltip(
                                         "Projektgebühr / Mob-Demob / Standby (Summe)")
                                 else:
                                     ui.label(f"= {eur((it['qty'] or 0) * (it['price'] or 0))}").classes(
@@ -568,10 +579,10 @@ def render() -> None:
                                          on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
                                          ).props("dense outlined").classes("w-48" if is_project else "w-64")
                             else:
-                                AmountInput("Betrag", value=it["amount"],
+                                AmountInput(amount_label("Betrag", vat0), value=it["amount"],
                                             on_amount_change=lambda v, it=it: (
                                                 it.__setitem__("amount", v), _refresh_total())
-                                            ).classes("w-32")
+                                            ).classes("w-40")
                                 ui.input("Notiz", value=it["note"],
                                          on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
                                          ).props("dense outlined").classes("w-80")
@@ -733,7 +744,8 @@ def render() -> None:
                               on_change=lambda e, sid=sid: _save_field(sid, payment_days=int(e.value or 0))
                               ).props("dense outlined").classes("w-28")
                     ui.checkbox("USt", value=vat,
-                                on_change=lambda e, sid=sid: _save_field(sid, is_vatable=bool(e.value)))
+                                on_change=lambda e, sid=sid: _save_field(sid, is_vatable=bool(e.value))
+                                ).tooltip(vat_flag_tooltip("revenue"))
                     ui.button(icon="delete", on_click=lambda sid=sid, name=name, is_cat=is_cat:
                               _delete_stream(sid, name, is_cat)
                               ).props("flat round dense color=negative").tooltip("löschen")
@@ -836,7 +848,15 @@ def render() -> None:
                 parent = ui.select({0: "— keine Kategorie —", **cats}, value=0,
                                    label="Kategorie (optional)").classes("w-72")
                 days = ui.number("Zahlungsziel (Tage)", value=30, min=0, max=365, step=1).classes("w-72")
-                vat = ui.checkbox("umsatzsteuerpflichtig", value=True)
+                vat = ui.checkbox("umsatzsteuerpflichtig (USt)", value=True
+                                  ).tooltip(vat_flag_tooltip("revenue"))
+                vat_note = ui.label().classes("text-xs text-gray-500 w-72")
+
+                def _vat_note(v: bool) -> None:
+                    vat_note.text = vat_hint_text(bool(v), side="revenue")[0]
+
+                _vat_note(True)
+                vat.on_value_change(lambda e: _vat_note(e.value))
             with ui.row():
                 ui.button("Abbrechen", on_click=dialog.close).props("flat")
 

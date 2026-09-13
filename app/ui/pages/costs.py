@@ -27,11 +27,14 @@ from ..formatting import MONTHS_DE, eur, eur_exact, fmt_amount, page_title, year
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
 from ..components.scenario_ui import base_toggle_panel, scenario_select
+from ..components.vat_hint import amount_label, vat_banner, vat_flag_tooltip, vat_hint_text
 
 CELL_COLORS = {"": "keine", "#fff3cd": "Gelb", "#d1e7dd": "Grün",
                "#f8d7da": "Rot", "#cfe2ff": "Blau", "#ffe5d0": "Orange", "#e2e3e5": "Grau"}
 
 _CELL_PARSER = DE_NUM_PARSER
+_VAT_WHERE = ("Umschalten: Haken „VSt“ unter „Ausgaben & Kategorien bearbeiten“ "
+              "am Ende des Reiters Ausgaben.")
 _CELL_STYLE = (
     'params => { if (params.data.kind === "category") return {fontWeight:"bold"};'
     ' if (params.data.kind === "grandtotal") return {fontWeight:"bold", backgroundColor:"#e2e8f0"};'
@@ -291,6 +294,10 @@ def render() -> None:
         ui.label("Einfachklick = Wert · Doppelklick = Detail/Notiz/Farbe · Klick auf ▶/▼ = "
                  "Kategorie auf/zu · Ziehen am Griff ⠿ = Reihenfolge / in Kategorie verschieben"
                  ).classes("text-xs text-gray-500")
+        ui.label("Beträge: exkl. MwSt. (netto) bei Positionen mit VSt-Haken — die Zahlung "
+                 "wird brutto gerechnet und die Vorsteuer kommt zurück; ohne VSt-Haken inkl. "
+                 "MwSt. (= Zahlbetrag). Der Haken sitzt unter „Ausgaben & Kategorien bearbeiten“."
+                 ).classes("text-xs text-gray-500")
         base_toggle_panel(state["scenario"], "cost", CostCategory, matrix.refresh)
 
     def _cell_col(args) -> str:
@@ -388,6 +395,7 @@ def render() -> None:
             if c is None:
                 return
             cname = c.name
+            vat0 = bool(c.is_vatable)
             pm = s.exec(select(CostPlanMonth).where(
                 CostPlanMonth.category_id == cat_id, CostPlanMonth.year == year,
                 CostPlanMonth.month == month)).first()
@@ -416,8 +424,10 @@ def render() -> None:
 
         with ui.dialog() as dlg, ui.card().classes("min-w-[640px]"):
             ui.label(f"{cname} — {MONTHS_DE[month - 1]} {year}").classes("text-lg font-bold")
+            vat_banner(vat0, where_to_change=_VAT_WHERE)
             with ui.row().classes("items-center gap-3"):
-                single_in = AmountInput("Einzelwert (€)", value=amount0).classes("w-44")
+                single_in = AmountInput(amount_label("Einzelwert", vat0),
+                                        value=amount0).classes("w-52")
                 use_list_sw = ui.switch("Detail-Aufstellung verwenden", value=has_list)
                 if generated:
                     # A contract drives this cell: its value is Σ of the lines.
@@ -439,17 +449,17 @@ def render() -> None:
                     with ui.row().classes("items-center gap-2"):
                         ui.icon("lock").classes("text-gray-400").tooltip(
                             f"aus Vertrag „{contract_name}“ — im Tab Verträge & Abos bearbeiten")
-                        ui.input("Betrag", value=fmt_amount(amount)).props(
-                            "dense outlined readonly").classes("w-32")
+                        ui.input(amount_label("Betrag", vat0), value=fmt_amount(amount)).props(
+                            "dense outlined readonly").classes("w-40")
                         ui.input("Notiz", value=note).props(
                             "dense outlined readonly").classes("w-80")
                         ui.label("Vertrag").classes("text-xs text-gray-500")
                 for it in items:
                     with ui.row().classes("items-center gap-2"):
-                        AmountInput("Betrag", value=it["amount"],
+                        AmountInput(amount_label("Betrag", vat0), value=it["amount"],
                                     on_amount_change=lambda v, it=it: (
                                         it.__setitem__("amount", v), _refresh_total())
-                                    ).classes("w-32")
+                                    ).classes("w-40")
                         ui.input("Notiz", value=it["note"],
                                  on_change=lambda e, it=it: it.__setitem__("note", e.value or "")
                                  ).props("dense outlined").classes("w-80")
@@ -554,7 +564,8 @@ def render() -> None:
                               on_change=lambda e, cid=cid: _save_field(cid, payment_days=int(e.value or 0))
                               ).props("dense outlined").classes("w-24")
                     ui.checkbox("VSt", value=vat,
-                                on_change=lambda e, cid=cid: _save_field(cid, is_vatable=bool(e.value)))
+                                on_change=lambda e, cid=cid: _save_field(cid, is_vatable=bool(e.value))
+                                ).tooltip(vat_flag_tooltip("cost"))
                     ui.checkbox("Anlage", value=capex,
                                 on_change=lambda e, cid=cid: _save_field(cid, is_capex=bool(e.value))
                                 ).tooltip("Anlagenzugang (CAPEX): zahlungswirksam inkl. Vorsteuer, "
@@ -660,6 +671,15 @@ def render() -> None:
                 parent = ui.select({0: "— keine Kategorie —", **cat_opts}, value=0,
                                    label="Kategorie (optional)").classes("w-72")
                 days = ui.number("Zahlungsziel (Tage)", value=30, min=0, max=365, step=1).classes("w-72")
+                vat_cb = ui.checkbox("Vorsteuerabzug (VSt)", value=True
+                                     ).tooltip(vat_flag_tooltip("cost"))
+                vat_note = ui.label().classes("text-xs text-gray-500 w-72")
+
+                def _vat_note(v: bool) -> None:
+                    vat_note.text = vat_hint_text(bool(v))[0]
+
+                _vat_note(True)
+                vat_cb.on_value_change(lambda e: _vat_note(e.value))
             with ui.row():
                 ui.button("Abbrechen", on_click=dialog.close).props("flat")
 
@@ -677,6 +697,7 @@ def render() -> None:
                             is_category=as_category,
                             parent_id=(None if as_category else (int(parent.value) or None)),
                             payment_days=(None if as_category else int(days.value or 0)),
+                            is_vatable=(True if as_category else bool(vat_cb.value)),
                             scenario_id=state["scenario"], sort_order=order))
                         s.commit()
                     dialog.close()
@@ -690,6 +711,7 @@ def render() -> None:
         with get_session() as s:
             existing = [(c.id, c.name) for c in s.exec(select(CostCategory)).all()
                         if c.scenario_id == state["scenario"] and not c.is_category]
+            vat_of = {c.id: bool(c.is_vatable) for c in s.exec(select(CostCategory)).all()}
         with ui.dialog() as dlg, ui.card().classes("min-w-[520px]"):
             ui.label("Wiederkehrende Ausgabe").classes("text-lg font-bold")
             ui.label("Füllt den monatlichen Betrag von Start- bis Endmonat. Einzelne Monate "
@@ -699,7 +721,27 @@ def render() -> None:
             new_name = ui.input("Name (falls neu)").classes("w-full")
             line = ui.select({l: PNL_LINE_DE[l] for l in PnlLine}, value=PnlLine.OPEX,
                              label="Bereich (falls neu)").classes("w-full")
-            amount = AmountInput("Betrag je Monat (€)", value=0).classes("w-48")
+            vat_cb = ui.checkbox("Vorsteuerabzug (VSt) (falls neu)", value=True
+                                 ).tooltip(vat_flag_tooltip("cost"))
+
+            def _vat_now() -> bool:
+                cid = int(target.value or 0)
+                return vat_of.get(cid, True) if cid else bool(vat_cb.value)
+
+            @ui.refreshable
+            def hint() -> None:
+                vat_banner(_vat_now(), where_to_change=_VAT_WHERE)
+
+            hint()
+            amount = AmountInput(amount_label("Betrag je Monat", True), value=0).classes("w-56")
+
+            def _sync_vat() -> None:
+                hint.refresh()
+                amount.props(f'label="{amount_label("Betrag je Monat", _vat_now())}"')
+                vat_cb.set_visibility(not int(target.value or 0))
+
+            target.on_value_change(lambda e: _sync_vat())
+            vat_cb.on_value_change(lambda e: _sync_vat())
             with ui.row().classes("items-center gap-3"):
                 start_m = ui.select({m: MONTHS_DE[m - 1] for m in range(1, 13)}, value=1,
                                     label="Startmonat").props("dense outlined").classes("w-40")
@@ -725,6 +767,7 @@ def render() -> None:
                             pl = PnlLine(line.value)
                             c = CostCategory(name=new_name.value, pnl_line=pl,
                                              opex_category=(OpexCategory.OTHER if pl == PnlLine.OPEX else None),
+                                             is_vatable=bool(vat_cb.value),
                                              scenario_id=state["scenario"], sort_order=order)
                             s.add(c)
                             s.commit()

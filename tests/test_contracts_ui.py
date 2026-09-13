@@ -27,5 +27,18 @@ async def test_new_contract_dialog_opens(user: User) -> None:
     await user.open("/")
     user.find("Vertrag hinzufügen").click()
     await user.should_see("Neuer Vertrag")
-    await user.should_see("Betrag je Intervall (€)")
+    # The Betrag field and the banner must follow the VSt flag of the position
+    # that is preselected (the first selectable cost row).
+    from sqlmodel import select
+
+    from app.db import get_session
+    from app.models import CostCategory
+    with get_session() as s:
+        first = next(c for c in s.exec(select(CostCategory).order_by(
+            CostCategory.sort_order, CostCategory.id)).all() if not c.is_category)
+        vatable = bool(first.is_vatable)
+    await user.should_see("Betrag je Intervall (exkl. MwSt.)" if vatable
+                          else "Betrag je Intervall (inkl. MwSt.)")
+    await user.should_see("Beträge exkl. MwSt. (netto) eingeben" if vatable
+                          else "Beträge inkl. MwSt. (= Zahlbetrag) eingeben")
     await user.should_see("Kündigungsfrist (Monate)")

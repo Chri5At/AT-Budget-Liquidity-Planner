@@ -38,6 +38,7 @@ from ...models import (
 from ...services.contracts_io import import_contracts, read_contracts_payload
 from ...services.recompute import recompute_all
 from ..components.amount_input import AmountInput
+from ..components.vat_hint import amount_label, vat_banner
 from ..file_dialogs import pick_folder
 from ..formatting import MONTHS_DE, eur, page_title
 from ..grid import fit_grid
@@ -85,6 +86,12 @@ def parse_date(text: str | None) -> date | None:
         except ValueError:
             continue
     return None
+
+
+def _category_vat() -> dict[int, bool]:
+    """Cost row id → VSt flag, so the dialog can say netto/brutto for the Betrag."""
+    with get_session() as s:
+        return {c.id: bool(c.is_vatable) for c in s.exec(select(CostCategory)).all()}
 
 
 def _category_options() -> dict[int, str]:
@@ -290,6 +297,7 @@ def render():
 
     def _edit_dialog(contract_id: int | None) -> None:
         cats = _category_options()
+        cat_vat = _category_vat()
         if not cats:
             ui.notify("Lege zuerst im Reiter Ausgaben eine Position an, der die Verträge "
                       "zugeordnet werden.", type="warning")
@@ -319,14 +327,32 @@ def render():
                              else next(iter(cats)))
                 cat_sel = ui.select(cats, value=cat_value, label="Ausgaben-Position"
                                     ).props("dense outlined").classes("w-72")
-                amount_in = AmountInput("Betrag je Intervall (€)",
-                                        value=values["amount"]).classes("w-48")
+
+                def _vat_now() -> bool:
+                    return cat_vat.get(int(cat_sel.value or 0), True)
+
+                amount_in = AmountInput(amount_label("Betrag je Intervall", _vat_now()),
+                                        value=values["amount"]).classes("w-56")
                 cycle_sel = ui.select({c.value: c.value for c in BillingCycle},
                                       value=BillingCycle(values["cycle"]).value,
                                       label="Rhythmus").props("dense outlined").classes("w-44")
             ui.label("Der Betrag wird genau wie ein händischer Zellenwert behandelt — "
                      "Zahlungsziel und USt kommen aus der gewählten Ausgaben-Position."
                      ).classes("text-xs text-gray-500")
+
+            @ui.refreshable
+            def vat_hint() -> None:
+                vat_banner(_vat_now(), where_to_change=(
+                    "Umschalten: Haken „VSt“ der Ausgaben-Position im Reiter Ausgaben "
+                    "unter „Ausgaben & Kategorien bearbeiten“."))
+
+            vat_hint()
+
+            def _sync_vat() -> None:
+                vat_hint.refresh()
+                amount_in.props(f'label="{amount_label("Betrag je Intervall", _vat_now())}"')
+
+            cat_sel.on_value_change(lambda e: _sync_vat())
 
             with ui.row().classes("gap-3 w-full"):
                 start_in = ui.input("Beginn (TT.MM.JJJJ)", value=_de(values["start"])
