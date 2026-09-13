@@ -34,8 +34,13 @@ def _version_tuple(v: str) -> tuple:
 
 # --- export ---------------------------------------------------------------
 
-def export_zip() -> Path:
-    """Write a timestamped backup ZIP into <data>/exports and return its path."""
+def export_filename() -> str:
+    """Suggested file name for a backup ZIP (timestamped)."""
+    return f"budget-export-{datetime.now():%Y%m%d-%H%M%S}.zip"
+
+
+def export_bytes() -> bytes:
+    """Build the backup ZIP (manifest.json + data.json) in memory."""
     with get_session() as s:
         payload = dump_all(s)
     manifest = {
@@ -44,12 +49,22 @@ def export_zip() -> Path:
         "app_version": __version__,
         "exported_at": datetime.now().isoformat(timespec="seconds"),
     }
-    exports = config.DATA_DIR / "exports"
-    exports.mkdir(parents=True, exist_ok=True)
-    path = exports / f"budget-export-{datetime.now():%Y%m%d-%H%M%S}.zip"
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         z.writestr("data.json", payload)
+    return buf.getvalue()
+
+
+def export_zip() -> Path:
+    """Write a timestamped backup ZIP into <data>/exports and return its path.
+
+    Default location used when the user is not asked for one (the UI asks).
+    """
+    exports = config.DATA_DIR / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    path = exports / export_filename()
+    path.write_bytes(export_bytes())
     return path
 
 

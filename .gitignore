@@ -20,6 +20,9 @@ data/*
 *.bak
 *.backup
 
+# Runtime bootstrap written by the app (data directory, last export folder)
+config.json
+
 # Internal design notes / working docs (kept private)
 .vibe/
 

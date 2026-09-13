@@ -16,6 +16,7 @@ from ...services.snapshots import (
     restore_snapshot,
     snapshot_kpis,
 )
+from ..file_dialogs import XLSX_TYPES, save_bytes
 from ..formatting import MONTHS_DE, eur, years
 from ..grid import fit_grid
 
@@ -47,7 +48,7 @@ def render() -> None:
     exp = {"scenario": 1, "year": years()[0],
            "start": f"{years()[0]}-01", "end": f"{years()[-1]}-12"}
 
-    def _export_scenario() -> None:
+    async def _export_scenario() -> None:
         start, end = _parse_ym(exp["start"]), _parse_ym(exp["end"])
         with get_session() as s:
             scs = {sc.id: sc.name for sc in list_scenarios(s)}
@@ -55,20 +56,21 @@ def render() -> None:
         name = scs.get(exp["scenario"], "Szenario")
         fn = (f"Budget_Liquiditaet_{_safe(name)}_{exp['start']}_bis_{exp['end']}"
               f"_{datetime.now():%Y-%m-%d}.xlsx")
-        ui.download.content(data, fn)
-        ui.notify(f"Export {name} ({exp['start']}–{exp['end']}) erstellt", type="positive")
+        await save_bytes(data, fn, file_types=XLSX_TYPES,
+                         what=f"Export {name} ({exp['start']}–{exp['end']})")
 
-    def _export_comparison() -> None:
+    async def _export_comparison() -> None:
         with get_session() as s:
             data = export_scenario_comparison(s, exp["year"])
-        ui.download.content(data, f"Szenarienvergleich_{exp['year']}_{datetime.now():%Y-%m-%d}.xlsx")
-        ui.notify("Szenarienvergleich exportiert", type="positive")
+        fn = f"Szenarienvergleich_{exp['year']}_{datetime.now():%Y-%m-%d}.xlsx"
+        await save_bytes(data, fn, file_types=XLSX_TYPES, what="Szenarienvergleich")
 
     with ui.card().classes("w-full max-w-4xl"):
         ui.label("Excel-Export").classes("text-base font-semibold")
         ui.label("Ein Dokument je Szenario (Budget, Liquidität, Personal, Einnahmen, Ausgaben) "
                  "oder ein Szenarienvergleich mit Diagrammen. Der Zeitraum (Von/Bis) begrenzt "
-                 "den Szenario-Export.").classes("text-xs text-gray-500")
+                 "den Szenario-Export. Der Speicherort wird beim Export abgefragt."
+                 ).classes("text-xs text-gray-500")
         with ui.row().classes("items-center gap-3 mt-1 flex-wrap"):
             with get_session() as s:
                 sc_opts = {sc.id: sc.name for sc in list_scenarios(s)}

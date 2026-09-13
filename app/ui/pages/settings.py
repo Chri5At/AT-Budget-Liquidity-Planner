@@ -1,9 +1,7 @@
 """Einstellungen — global planning parameters (split model, %, opening balance…)."""
 from __future__ import annotations
 
-import os
 from datetime import date
-from pathlib import Path
 
 from nicegui import ui
 from sqlalchemy import delete as sa_delete
@@ -29,6 +27,7 @@ from ...models import (
 from ...models.enums import SPLIT_MODEL_DE
 from ...services.recompute import recompute_all
 from ..components.amount_input import AmountInput
+from ..file_dialogs import ZIP_TYPES, pick_folder, save_bytes
 from ..formatting import eur
 
 # Source tables wiped by "Alle Daten löschen" (Settings is kept, flagged seeded).
@@ -120,21 +119,14 @@ def render() -> None:
                   color="negative", on_click=_confirm_reset).props("outline")
 
 
-def _open_folder(path: Path) -> None:
+async def _export() -> None:
     try:
-        os.startfile(str(path))     # noqa: S606 — Windows Explorer on a known local path
-    except Exception:
-        pass
-
-
-def _export() -> None:
-    try:
-        path = data_io.export_zip()
+        data = data_io.export_bytes()
     except Exception as exc:        # noqa: BLE001 — surface any failure to the user
         ui.notify(f"Export fehlgeschlagen: {exc}", type="negative")
         return
-    ui.notify(f"Exportiert: {path.name}", type="positive")
-    _open_folder(path.parent)
+    await save_bytes(data, data_io.export_filename(), file_types=ZIP_TYPES,
+                     what="Sicherung")
 
 
 def _on_upload(e) -> None:
@@ -181,20 +173,10 @@ def _confirm_import(fname: str, manifest: dict, payload: str) -> None:
 
 
 async def _browse(target) -> None:
-    """Best-effort native folder picker; falls back to manual entry in the browser."""
-    from nicegui import app, run
-    win = getattr(getattr(app, "native", None), "main_window", None)
-    if win is None:
-        ui.notify("Dateidialog nur in der App verfügbar — bitte Pfad eingeben.", type="info")
-        return
-    try:
-        import webview
-        res = await run.io_bound(win.create_file_dialog, webview.FOLDER_DIALOG)
-    except Exception:               # noqa: BLE001
-        ui.notify("Dateidialog nicht verfügbar — bitte Pfad eingeben.", type="info")
-        return
-    if res:
-        target.value = str(res[0] if isinstance(res, (list, tuple)) else res)
+    """Native folder picker for the data directory; manual entry in the browser."""
+    chosen = await pick_folder(config.DATA_DIR)
+    if chosen is not None:
+        target.value = str(chosen)
 
 
 def _change_dir(new_dir: str) -> None:
@@ -236,9 +218,9 @@ def _data_section() -> None:
             ui.button("Daten exportieren (ZIP)", icon="download", on_click=_export)
             ui.upload(label="ZIP importieren", auto_upload=True, on_upload=_on_upload).props(
                 'accept=".zip" flat').classes("max-w-xs")
-        ui.label("Export legt eine ZIP-Sicherung im Ordner „exports“ ab (mit App-Version). "
-                 "Import ersetzt die aktuellen Daten — vorher wird automatisch ein Snapshot "
-                 "angelegt.").classes("text-xs text-gray-500")
+        ui.label("Export fragt den Speicherort ab und legt dort eine ZIP-Sicherung an "
+                 "(mit App-Version). Import ersetzt die aktuellen Daten — vorher wird "
+                 "automatisch ein Snapshot angelegt.").classes("text-xs text-gray-500")
 
 
 def _confirm_reset() -> None:

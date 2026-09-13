@@ -20,3 +20,10 @@ async def test_index_renders_all_tabs(user: User) -> None:
     await user.should_see("Einnahmen")
     await user.should_see("Liquidität")
     await user.should_see("GuV / Budget")
+
+
+async def test_scenario_export_hands_over_a_file(user: User) -> None:
+    """Without a native window the export falls back to a browser download."""
+    await user.open("/")
+    user.find("Szenario exportieren").click()
+    await user.should_see("wird heruntergeladen")
