@@ -15,6 +15,11 @@ the numbers were unreadable.
 
 Pinned columns (labels on the left, totals on the right) and columns explicitly
 marked `suppressSizeToFit` keep their fixed widths.
+
+Column groups (`children`) are flattened, so grouped value columns flex too. NiceGUI
+only detects `flex` on top-level columns when deciding whether to add its own
+`autoSizeStrategy`; with groups, pass `auto_size_columns=False` to `ui.aggrid` or
+the grid renders blank.
 """
 from __future__ import annotations
 
@@ -46,15 +51,25 @@ def _money_min_width(max_abs: float) -> int:
     return max(_VALUE_FLOOR, chars * _PX_PER_CHAR + _CELL_PADDING)
 
 
+def _leaf_columns(cols: list[dict]) -> list[dict]:
+    """Flatten ag-Grid column groups (`children`) down to the leaf columns."""
+    out: list[dict] = []
+    for col in cols:
+        if "children" in col:
+            out.extend(_leaf_columns(col["children"]))
+        else:
+            out.append(col)
+    return out
+
+
 def fit_grid(options: dict) -> dict:
     """Make value columns flex to fill the width with a readable minimum.
 
     Mutates and returns the ag-Grid `options` dict so call sites can simply wrap
     their literal: ``ui.aggrid(fit_grid({...}))``.
     """
-    cols = options.get("columnDefs") or []
     rows = (options.get("rowData") or []) + (options.get("pinnedBottomRowData") or [])
-    for col in cols:
+    for col in _leaf_columns(options.get("columnDefs") or []):
         field = col.get("field")
         if not field or col.get("pinned") or col.get("suppressSizeToFit"):
             continue

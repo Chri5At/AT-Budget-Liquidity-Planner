@@ -36,10 +36,10 @@ any third party.
 **Never used GitHub before? This is all you need — no Python, no installation.**
 
 1. Open the **[Releases page](https://github.com/Chri5At/AT-Budget-Liquidity-Planner/releases/latest)**.
-2. Under **Assets**, click **`BudgetLiquidity-1.3.1.exe`** — the download starts.
+2. Under **Assets**, click **`BudgetLiquidity-1.3.2.exe`** — the download starts.
    (If you only see a "Source code" zip, the `.exe` is hidden behind the small
    **Assets ▸** triangle — click it to expand the list.)
-3. In your browser's downloads, **double-click** `BudgetLiquidity-1.3.1.exe`.
+3. In your browser's downloads, **double-click** `BudgetLiquidity-1.3.2.exe`.
 4. Windows shows a blue **"Windows protected your PC"** box. This is normal — the
    app is free and open-source but **not code-signed**. Click **More info**, then
    the **Run anyway** button that appears.

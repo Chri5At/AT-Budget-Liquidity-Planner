@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.2] — 2026-09-14
+
+### Fixed
+- **Snapshot-Vergleich: „Tiefststand Liquidität“ und „Endsaldo Liquidität“ galten
+  fürs ganze Planungsende statt fürs gewählte Jahr.** Beide Kennzahlen wurden aus
+  der kompletten Kontostand-Reihe bis zum Planungsende (z. B. 2028) gezogen, egal
+  welches Jahr im Vergleich eingestellt war. Jetzt zählen nur die 15./Monatsende-
+  Buckets des gewählten Zeitraums: Tiefststand = niedrigster Kontostand darin,
+  Endsaldo = Kontostand am letzten Bucket des Zeitraums.
+
+### Added
+- **Snapshot-Vergleich nach Jahr, Quartal oder Monat.** Neue Auswahl „Auflösung“:
+  bei Quartal/Monat zeigt die Tabelle je Periode Snapshot / Aktuell / Differenz
+  plus eine Spalte „Gesamt“ fürs Jahr; der Haken „nur Differenz“ blendet die
+  Absolutwerte aus (kompakt bei 12 Monaten). Das Diagramm zeigt dann den Verlauf
+  Snapshot vs. Aktuell je Periode für eine wählbare Kennzahl.
+- **Umsatzerlöse je Einnahmequelle im Vergleich.** Unter „Umsatzerlöse“ steht
+  jede Quelle als eigene Zeile. Zuordnung über die ID der Quelle, nicht den Namen:
+  eine seit dem Snapshot umbenannte Quelle bleibt vergleichbar und trägt den
+  alten Namen als Hinweis „(im Snapshot: …)“; Quellen, die nur auf einer Seite
+  existieren, sind als „nur im Snapshot“ bzw. „neu, nicht im Snapshot“ markiert.
+- Beide Seiten werden je Jahr/Szenario nur einmal durchgerechnet und dann pro
+  Periode aufgeteilt; die Monatsansicht kostet nichts extra.
 ## [1.3.1] — 2026-09-13
 
 ### Added
