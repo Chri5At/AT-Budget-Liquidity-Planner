@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.3] — 2026-09-24
+
+### Added
+- **„Zelle leeren“ im Zellen-Dialog (Einnahmen + Ausgaben).** Ein Klick entfernt
+  Wert, Detail-Aufstellung, Notiz und Zellenfarbe — statt Farbe zurücksetzen,
+  Schalter „Detail-Aufstellung“ umlegen und Betrag löschen. In Ausgaben bleiben
+  Zeilen aus Verträgen & Abos erhalten (sie werden dort gepflegt).
+- **Zelle in Folgejahre kopieren.** „Auch in diese Monate kopieren“ bietet jetzt
+  jeden Monat des Planungszeitraums an („Mär 2027“), nicht nur die des offenen
+  Jahres — mit Wert, Aufstellung, Notiz und Farbe. Schnellauswahl: „Rest des
+  Jahres“, „gleicher Monat im Folgejahr“, „ganzes Folgejahr“.
+
 ## [1.3.2] — 2026-09-14
 
 ### Fixed

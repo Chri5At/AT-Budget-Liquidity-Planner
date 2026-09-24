@@ -27,6 +27,7 @@ from ...services.vat_convert import conversion_factor, convert_cost_values, cost
 from ..formatting import MONTHS_DE, eur, eur_exact, fmt_amount, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
+from ..components.cell_copy import copy_targets_select, selected_targets
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 from ..components.vat_hint import (
     amount_label,
@@ -117,6 +118,23 @@ def _apply_cell_content(s, cat_id: int, year: int, month: int, *, use_list: bool
     pm.color = color or ""
     s.commit()
     if use_list or generated:
+        _recompute_cell(s, cat_id, year, month)
+
+
+def _clear_cell(s, cat_id: int, year: int, month: int) -> None:
+    """Reset a cell in one go: value, hand-entered lines, note and colour.
+
+    Lines generated from a contract stay — they belong to the Verträge & Abos tab
+    — so a contract-driven cell falls back to Σ of those lines.
+    """
+    for e in _manual_entries(s, cat_id, year, month):
+        s.delete(e)
+    pm = _cell_pm(s, cat_id, year, month)
+    pm.amount = 0.0
+    pm.note = ""
+    pm.color = ""
+    s.commit()
+    if _generated_entries(s, cat_id, year, month):
         _recompute_cell(s, cat_id, year, month)
 
 
@@ -500,19 +518,31 @@ def render() -> None:
             list_box.set_visibility(has_list)
             single_in.set_visibility(not has_list)
 
-            copy_sel = ui.select({m: MONTHS_DE[m - 1] for m in range(1, 13) if m != month},
-                                 multiple=True, label="Auch in diese Monate kopieren (optional)"
-                                 ).props("dense outlined use-chips").classes("w-full mt-2")
+            copy_sel = copy_targets_select(year, month)
 
-            with ui.row().classes("mt-2"):
+            with ui.row().classes("mt-2 w-full items-center"):
+                def _clear() -> None:
+                    with get_session() as s:
+                        _clear_cell(s, cat_id, year, month)
+                    recompute_all()
+                    dlg.close()
+                    matrix.refresh()
+                    ui.notify("Zelle geleert" + (" — Vertragszeilen bleiben erhalten"
+                                                 if generated else ""), type="positive")
+
+                ui.button("Zelle leeren", icon="backspace", on_click=_clear
+                          ).props("flat color=negative").tooltip(
+                    "Wert, Detail-Aufstellung, Notiz und Farbe dieser Zelle entfernen"
+                    + (" (Vertragszeilen bleiben)" if generated else ""))
+                ui.space()
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
                 def _save() -> None:
                     use_list = modal["use_list"]
-                    targets = sorted({month, *[int(m) for m in (copy_sel.value or [])]})
+                    targets = [(year, month), *selected_targets(copy_sel)]
                     with get_session() as s:
-                        for tm in targets:
-                            _apply_cell_content(s, cat_id, year, tm, use_list=use_list, items=items,
+                        for ty, tm in targets:
+                            _apply_cell_content(s, cat_id, ty, tm, use_list=use_list, items=items,
                                                 note=note_in.value, color=modal["color"],
                                                 single_value=single_in.amount)
                     recompute_all()
