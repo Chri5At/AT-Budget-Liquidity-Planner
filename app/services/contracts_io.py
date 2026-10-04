@@ -17,6 +17,7 @@ import json
 
 from sqlmodel import Session, select
 
+from ..engine.contracts import contract_positions, dump_positions
 from ..models import Contract, CostCategory, OpexCategory, PnlLine
 
 CONTRACT_KEY = "Contract"
@@ -107,6 +108,13 @@ def import_contracts(session: Session, rows: list[dict], *,
             continue
         known = {k: v for k, v in row.items() if k in fields and k not in _SKIP_FIELDS}
         known["category_id"] = category_id
+        if isinstance(known.get("positions"), list):    # friendlier hand-written files
+            known["positions"] = dump_positions(known["positions"])
+        if known.get("positions"):                      # amount is always Σ positions
+            parsed = contract_positions(Contract(name="", category_id=0, start=None,
+                                                 positions=known["positions"]))
+            if parsed:
+                known["amount"] = round(sum(p["amount"] for p in parsed), 2)
         order += 1
         known.setdefault("sort_order", order)
         session.add(Contract(**_coerce_dates(Contract, known)))

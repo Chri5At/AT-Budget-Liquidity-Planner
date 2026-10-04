@@ -23,6 +23,7 @@ Two independent jobs live here:
 from __future__ import annotations
 
 import calendar as _cal
+import json
 from datetime import date
 
 from sqlmodel import Session, select
@@ -81,6 +82,35 @@ def pays(contract: Contract) -> bool:
     if contract.status == ContractStatus.ACTIVE:
         return True
     return contract.status == ContractStatus.CANCELLED and contract.end is not None
+
+
+def contract_positions(contract: Contract) -> list[dict]:
+    """The contract's price breakdown as [{"amount", "note"}]; [] when it has none.
+
+    Tolerates junk in the stored JSON (a hand-edited import file) by dropping
+    whatever is not a usable position instead of failing the whole recompute.
+    """
+    try:
+        raw = json.loads(contract.positions or "[]")
+    except (TypeError, ValueError):
+        return []
+    out: list[dict] = []
+    for p in raw if isinstance(raw, list) else []:
+        if not isinstance(p, dict):
+            continue
+        try:
+            amount = float(p.get("amount") or 0)
+        except (TypeError, ValueError):
+            continue
+        out.append({"amount": amount, "note": str(p.get("note") or "")})
+    return out
+
+
+def dump_positions(positions: list[dict]) -> str:
+    """Serialise positions for `Contract.positions`, dropping empty rows."""
+    keep = [{"amount": float(p.get("amount") or 0), "note": str(p.get("note") or "").strip()}
+            for p in positions if (p.get("amount") or str(p.get("note") or "").strip())]
+    return json.dumps(keep, ensure_ascii=False) if keep else ""
 
 
 def cycle_months(contract: Contract) -> int:
@@ -278,13 +308,20 @@ def generate_contract_cells(session: Session) -> int:
             if cell not in was_generated:
                 _keep_manual_amount(session, *cell)
             existing = cell_entries(session, *cell)
-            session.add(CostCellEntry(
-                category_id=category.id, year=due.year, month=due.month,
-                sort_order=len(existing), amount=contract.amount,
-                note=_note_for(contract), contract_id=contract.id))
+            # With a price breakdown every position becomes its own line, so the
+            # Ausgaben detail dialog shows the contract's positions individually.
+            parts = [(p["amount"], f"{contract.name}: {p['note']}" if p["note"]
+                      else _note_for(contract))
+                     for p in contract_positions(contract) if p["amount"]]
+            for i, (amount, note) in enumerate(parts or [(contract.amount,
+                                                         _note_for(contract))]):
+                session.add(CostCellEntry(
+                    category_id=category.id, year=due.year, month=due.month,
+                    sort_order=len(existing) + i, amount=amount,
+                    note=note, contract_id=contract.id))
+                count += 1
             session.flush()
             touched.add(cell)
-            count += 1
     session.commit()
 
     # 3. A cell's amount is Σ of its lines — re-sum everything we touched.
