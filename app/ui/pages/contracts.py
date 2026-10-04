@@ -22,6 +22,8 @@ from ...db import get_session
 from ...engine.contracts import (
     annual_total,
     cancellation_deadline,
+    contract_positions,
+    dump_positions,
     monthly_equiv,
     next_due,
     renewal_date,
@@ -40,7 +42,7 @@ from ...services.recompute import recompute_all
 from ..components.amount_input import AmountInput
 from ..components.vat_hint import amount_label, vat_banner
 from ..file_dialogs import pick_folder
-from ..formatting import MONTHS_DE, eur, page_title
+from ..formatting import MONTHS_DE, eur, eur_exact, page_title
 from ..grid import fit_grid
 from ..path_open import open_folder
 
@@ -55,8 +57,18 @@ _AMPEL_RENDER = (
     ' var c = m[params.value] || m.grey;'
     ' return "<span title=\'" + (params.data.ampel_hint || "") + "\'"'
     ' + " style=\'color:" + c + ";font-size:17px\'>&#9679;</span>"; }')
-_ACTION_RENDER = ('params => params.value'
-                  ' ? "<span style=\'cursor:pointer\'>" + params.value + "</span>" : ""')
+# The value is a Material icon name (edit / folder_open / delete); the font ships
+# with NiceGUI, so the ligature renders as the glyph instead of the word.
+_ACTION_RENDER = (
+    'params => { if (!params.value) return "";'
+    ' var f = params.colDef.field, c = f === "del" ? "#dc2626" : "#1976d2";'
+    ' return "<i class=\'material-icons\' title=\'" + (params.data["hint_" + f] || "") + "\'"'
+    ' + " style=\'cursor:pointer;font-size:19px;vertical-align:middle;color:" + c + "\'>"'
+    ' + params.value + "</i>"; }')
+_ACTION_COL = {"width": 40, "pinned": "right", "sortable": False, "resizable": False,
+               "suppressSizeToFit": True, "suppressMenu": True,
+               "cellStyle": {"padding": "0", "textAlign": "center"},
+               ":cellRenderer": _ACTION_RENDER}
 _ROW_STYLE = ('params => params.data.status === "aktiv" ? null'
               ' : {color: "#6b7280", fontStyle: "italic"}')
 
@@ -127,6 +139,9 @@ def _row(contract: Contract, category_name: str, today: date) -> dict:
         "contract_no": contract.contract_no,
         "category": category_name,
         "amount": round(contract.amount, 2),
+        "amount_hint": " · ".join(
+            f"{p['note'] or 'Position'}: {eur_exact(p['amount'])}"
+            for p in contract_positions(contract)),
         "cycle": BillingCycle(contract.cycle).value,
         "monthly": round(monthly_equiv(contract), 2),
         "next_due": _de(next_due(contract, today)),
@@ -223,6 +238,7 @@ def render():
             {"headerName": "Ausgaben-Position", "field": "category", "width": 140,
              "suppressSizeToFit": True},
             {"headerName": "Betrag", "field": "amount", "type": "numericColumn",
+             "tooltipField": "amount_hint",
              ":valueFormatter": "p => p.value != null ? p.value.toLocaleString('de-DE',"
                                "{minimumFractionDigits:2, maximumFractionDigits:2}) + ' €' : ''"},
             {"headerName": "Rhythmus", "field": "cycle", "width": 100,
@@ -240,12 +256,9 @@ def render():
              "suppressSizeToFit": True},
             {"headerName": "Status", "field": "status", "width": 86,
              "suppressSizeToFit": True},
-            {"headerName": "", "field": "edit", "width": 40, "pinned": "right",
-             "sortable": False, "suppressSizeToFit": True, ":cellRenderer": _ACTION_RENDER},
-            {"headerName": "", "field": "doc", "width": 40, "pinned": "right",
-             "sortable": False, "suppressSizeToFit": True, ":cellRenderer": _ACTION_RENDER},
-            {"headerName": "", "field": "del", "width": 40, "pinned": "right",
-             "sortable": False, "suppressSizeToFit": True, ":cellRenderer": _ACTION_RENDER},
+            {"headerName": "", "field": "edit", **_ACTION_COL},
+            {"headerName": "", "field": "doc", **_ACTION_COL},
+            {"headerName": "", "field": "del", **_ACTION_COL},
         ]
         if not rows:
             ui.label("Noch keine Verträge erfasst — „Vertrag hinzufügen“ legt den ersten an."
@@ -308,7 +321,9 @@ def render():
                 if c is None:
                     return
                 values = c.model_dump()
+                positions = contract_positions(c)
         else:
+            positions = []
             values = Contract(name="", category_id=next(iter(cats)),
                               start=_today()).model_dump()
 
@@ -340,6 +355,69 @@ def render():
                      "Zahlungsziel und USt kommen aus der gewählten Ausgaben-Position."
                      ).classes("text-xs text-gray-500")
 
+            # --- optional price breakdown (like the Ausgaben/Einnahmen details) ---
+            pos_state = {"use": bool(positions)}
+            if not positions:
+                positions.append({"amount": 0.0, "note": ""})
+            pos_sw = ui.switch("Preis-Positionen verwenden (Betrag = Summe)",
+                               value=pos_state["use"])
+            pos_box = ui.column().classes("w-full gap-1")
+
+            def _pos_sum() -> float:
+                return sum(p["amount"] or 0 for p in positions)
+
+            def _refresh_pos_total() -> None:
+                pos_total.text = f"Summe je Intervall: {eur_exact(_pos_sum())}"
+
+            @ui.refreshable
+            def pos_lines() -> None:
+                for p in positions:
+                    with ui.row().classes("items-start gap-2"):
+                        AmountInput(amount_label("Betrag", _vat_now()), value=p["amount"],
+                                    on_amount_change=lambda v, p=p: (
+                                        p.__setitem__("amount", v), _refresh_pos_total())
+                                    ).classes("w-44")
+                        ui.input("Position", value=p["note"],
+                                 placeholder="z. B. Hauptmietzins, Betriebskosten …",
+                                 on_change=lambda e, p=p: p.__setitem__("note", e.value or "")
+                                 ).props("dense outlined").classes("w-96")
+
+                        def _remove(p=p) -> None:
+                            positions.remove(p)
+                            if not positions:
+                                positions.append({"amount": 0.0, "note": ""})
+                            pos_lines.refresh()
+                            _refresh_pos_total()
+
+                        ui.button(icon="close", on_click=_remove).props(
+                            "flat round dense").tooltip("Position entfernen")
+
+            def _add_pos() -> None:
+                positions.append({"amount": 0.0, "note": ""})
+                pos_lines.refresh()
+
+            with pos_box:
+                pos_lines()
+                with ui.row().classes("items-center gap-3"):
+                    ui.button("Position hinzufügen", icon="add", on_click=_add_pos
+                              ).props("flat")
+                    pos_total = ui.label().classes("text-sm font-semibold")
+            _refresh_pos_total()
+
+            def _toggle_pos(e) -> None:
+                pos_state["use"] = bool(e.value)
+                pos_box.set_visibility(pos_state["use"])
+                amount_in.set_visibility(not pos_state["use"])
+                if pos_state["use"] and _pos_sum() == 0 and amount_in.amount:
+                    # Start the breakdown from the single amount instead of 0 €.
+                    positions[:] = [{"amount": amount_in.amount, "note": ""}]
+                    pos_lines.refresh()
+                    _refresh_pos_total()
+
+            pos_sw.on_value_change(_toggle_pos)
+            pos_box.set_visibility(pos_state["use"])
+            amount_in.set_visibility(not pos_state["use"])
+
             @ui.refreshable
             def vat_hint() -> None:
                 vat_banner(_vat_now(), where_to_change=(
@@ -351,6 +429,7 @@ def render():
             def _sync_vat() -> None:
                 vat_hint.refresh()
                 amount_in.props(f'label="{amount_label("Betrag je Intervall", _vat_now())}"')
+                pos_lines.refresh()
 
             cat_sel.on_value_change(lambda e: _sync_vat())
 
@@ -426,10 +505,13 @@ def render():
                         ui.notify("Das Ende liegt vor dem Beginn", type="warning")
                         return
                     status = ContractStatus(status_sel.value)
+                    pos_json = dump_positions(positions) if pos_state["use"] else ""
+                    amount = round(_pos_sum(), 2) if pos_state["use"] else amount_in.amount
                     fields = dict(
                         name=name_in.value.strip(), partner=partner_in.value or "",
                         contract_no=no_in.value or "", category_id=int(cat_sel.value),
-                        amount=amount_in.amount, cycle=BillingCycle(cycle_sel.value),
+                        amount=amount, positions=pos_json,
+                        cycle=BillingCycle(cycle_sel.value),
                         start=start, first_due=first_due, end=end,
                         auto_renew=bool(renew_cb.value),
                         notice_months=int(notice_in.value or 0),

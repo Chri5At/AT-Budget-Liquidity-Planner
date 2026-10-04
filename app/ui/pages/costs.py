@@ -27,6 +27,7 @@ from ...services.vat_convert import conversion_factor, convert_cost_values, cost
 from ..formatting import MONTHS_DE, eur, eur_exact, fmt_amount, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
+from ..components.cell_copy import copy_targets_select, selected_targets
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 from ..components.vat_hint import (
     amount_label,
@@ -45,6 +46,8 @@ _VAT_WHERE = ("Umschalten: Haken „VSt“ unter „Ausgaben & Kategorien bearbe
 _CELL_STYLE = (
     'params => { if (params.data.kind === "category") return {fontWeight:"bold"};'
     ' if (params.data.kind === "grandtotal") return {fontWeight:"bold", backgroundColor:"#e2e8f0"};'
+    ' if (params.data.kind === "contract" || params.data.kind === "manual")'
+    '   return {color:"#4b5563", fontStyle:"italic"};'
     ' var c = params.data["color"+params.colDef.field.substring(1)];'
     ' return c?{backgroundColor:c}:null; }')
 _CELL_RENDER = (
@@ -59,9 +62,20 @@ _NAME_RENDER = (
     ' if (k==="grandtotal") return "<b>"+nm+"</b>";'
     ' if (k==="child"||k==="direct"){'
     '   return "<span style=\'padding-left:16px;color:#374151\'>"+nm+"</span>"; }'
+    ' if (k==="contract"||k==="manual"){'
+    '   var ic=k==="contract"?"🔗 ":"✎ ";'
+    '   var tip=k==="contract"?"aus Vertrag – im Tab Verträge & Abos bearbeiten"'
+    '     :"hand-erfasster Anteil dieser Ausgabe (ohne Vertrag)";'
+    '   return "<span title=\'"+tip+"\' style=\'padding-left:"+(params.data.depth*16)+"px;'
+    'color:#4b5563;font-style:italic\'>"+ic+nm+"</span>"; }'
     ' return nm; }')
 _ROW_STYLE = ('params => params.data.kind === "category" '
-              '? {backgroundColor: params.data.row_color || "#fdecec"} : null')
+              '? {backgroundColor: params.data.row_color || "#fdecec"} '
+              ': (params.data.kind === "contract" || params.data.kind === "manual") '
+              '? {backgroundColor: "#f8fafc"} : null')
+# Read-only breakdown rows under a position a contract writes into. They only
+# split that position's total, so they are never summed, edited or dragged.
+_SUB_KINDS = ("contract", "manual")
 
 
 def _cat_days(c: CostCategory) -> int:
@@ -117,6 +131,23 @@ def _apply_cell_content(s, cat_id: int, year: int, month: int, *, use_list: bool
     pm.color = color or ""
     s.commit()
     if use_list or generated:
+        _recompute_cell(s, cat_id, year, month)
+
+
+def _clear_cell(s, cat_id: int, year: int, month: int) -> None:
+    """Reset a cell in one go: value, hand-entered lines, note and colour.
+
+    Lines generated from a contract stay — they belong to the Verträge & Abos tab
+    — so a contract-driven cell falls back to Σ of those lines.
+    """
+    for e in _manual_entries(s, cat_id, year, month):
+        s.delete(e)
+    pm = _cell_pm(s, cat_id, year, month)
+    pm.amount = 0.0
+    pm.note = ""
+    pm.color = ""
+    s.commit()
+    if _generated_entries(s, cat_id, year, month):
         _recompute_cell(s, cat_id, year, month)
 
 
@@ -185,10 +216,59 @@ def _data_row(s, c: CostCategory, year: int, kind: str, *, name: str | None = No
     for m in range(1, 13):
         pm = months.get(m)
         row[f"m{m}"] = round(pm.amount) if pm else 0
+        row[f"raw{m}"] = pm.amount if pm else 0.0
         row[f"color{m}"] = pm.color if pm else ""
         row[f"mark{m}"] = bool((pm and pm.note) or m in ent_months)
         row[f"detail{m}"] = m in ent_months
     return row
+
+
+def _contract_sub_rows(s, row: dict, year: int, depth: int) -> list[dict]:
+    """Read-only rows listing each contract that writes into this position.
+
+    The contract's money already sits in the position's cells (Σ of its lines),
+    so these rows only break that total down. When the position also carries
+    hand-entered amounts, a "manuell erfasst" row shows that remainder — which
+    makes a duplicate (rent typed in by hand AND registered as a contract)
+    visible at a glance.
+    """
+    cat_id = row["id"]
+    gen = s.exec(select(CostCellEntry).where(
+        CostCellEntry.category_id == cat_id, CostCellEntry.year == year,
+        CostCellEntry.contract_id != None)).all()      # noqa: E711 (SQL IS NOT NULL)
+    if not gen:
+        return []
+    per_contract: dict[int, list[float]] = {}
+    for e in gen:
+        if 1 <= e.month <= 12:
+            per_contract.setdefault(e.contract_id, [0.0] * 12)[e.month - 1] += e.amount
+    contracts = {c.id: c for c in s.exec(select(Contract)).all()}
+    order = sorted(per_contract, key=lambda i: (
+        contracts[i].sort_order if i in contracts else 0, i))
+    out: list[dict] = []
+    gen_sum = [0.0] * 12
+    for ct_id in order:
+        ct = contracts.get(ct_id)
+        sub = {"rid": f"ct-{cat_id}-{ct_id}", "id": cat_id, "kind": "contract",
+               "contract_id": ct_id, "depth": depth,
+               "name": ct.name if ct else "?", "bereich": "Vertrag & Abo"}
+        for m in range(1, 13):
+            sub[f"m{m}"] = round(per_contract[ct_id][m - 1])
+            gen_sum[m - 1] += per_contract[ct_id][m - 1]
+        out.append(sub)
+    rest = [row[f"raw{m}"] - gen_sum[m - 1] for m in range(1, 13)]
+    if any(abs(x) >= 0.005 for x in rest):
+        man = {"rid": f"man-{cat_id}", "id": cat_id, "kind": "manual", "depth": depth,
+               "name": "manuell erfasst", "bereich": "ohne Vertrag"}
+        for m in range(1, 13):
+            man[f"m{m}"] = round(rest[m - 1])
+        out.append(man)
+    row["has_contracts"] = True
+    return out
+
+
+def _with_contract_rows(s, row: dict, year: int, depth: int) -> list[dict]:
+    return [row] + _contract_sub_rows(s, row, year, depth)
 
 
 def _own_amounts(s, cat_id: int, year: int) -> list[float]:
@@ -227,9 +307,10 @@ def _load_tree_rows(year: int, scenario_id: int, collapsed: set) -> list[dict]:
                     rows.append(_data_row(s, c, year, "direct",
                                           name="↳ Allgemein (direkt)", cat_id=c.id))
                     for kid in kids:
-                        rows.append(_data_row(s, kid, year, "child", cat_id=c.id))
+                        rows += _with_contract_rows(
+                            s, _data_row(s, kid, year, "child", cat_id=c.id), year, 2)
             else:
-                rows.append(_data_row(s, c, year, "leaf"))
+                rows += _with_contract_rows(s, _data_row(s, c, year, "leaf"), year, 1)
         return rows
 
 
@@ -256,14 +337,17 @@ def render() -> None:
         if not rows and state["scenario"] != 1:
             ui.label("Keine Ausgaben in diesem Szenario — füge Positionen hinzu.").classes(
                 "text-sm text-gray-500")
-        editable = "params => params.data.kind !== 'category'"
-        editable_month = ("params => params.data.kind !== 'category' && "
+        editable = ("params => ['category','contract','manual']"
+                    ".indexOf(params.data.kind) < 0")
+        editable_month = ("params => ['category','contract','manual']"
+                          ".indexOf(params.data.kind) < 0 && "
                           "!params.data['detail'+params.colDef.field.substring(1)]")
         col_defs = [
             {"headerName": "", "width": 38, "pinned": "left", "sortable": False,
              "resizable": False, "suppressMenu": True, "suppressSizeToFit": True,
              ":valueGetter": "() => ''",
-             ":rowDrag": "params => params.data.kind !== 'direct'"},
+             ":rowDrag": "params => ['direct','contract','manual']"
+                         ".indexOf(params.data.kind) < 0"},
             {"headerName": "Ausgabe / Kategorie", "field": "name", "pinned": "left", "width": 230,
              "suppressSizeToFit": True, ":editable": editable, ":cellRenderer": _NAME_RENDER},
             {"headerName": "Bereich", "field": "bereich", "width": 150, "suppressSizeToFit": True},
@@ -314,7 +398,7 @@ def render() -> None:
         a = e.args or {}
         data = a.get("data") or {}
         col = _cell_col(a)
-        if "id" not in data or data.get("kind") == "category":
+        if "id" not in data or data.get("kind") in ("category", *_SUB_KINDS):
             return
         cid = int(data["id"])
         if col == "name":
@@ -326,6 +410,11 @@ def render() -> None:
             _save_amount_cell(cid, state["year"], month, data.get(col, 0))
             grid = state.get("grid")
             if grid is None:
+                return
+            if data.get("has_contracts"):
+                # The typed value lands in the "manuell erfasst" breakdown row,
+                # which may not exist yet — rebuild instead of patching cells.
+                matrix.refresh()
                 return
             cat_id = data.get("cat_id")
             with get_session() as s:
@@ -500,19 +589,31 @@ def render() -> None:
             list_box.set_visibility(has_list)
             single_in.set_visibility(not has_list)
 
-            copy_sel = ui.select({m: MONTHS_DE[m - 1] for m in range(1, 13) if m != month},
-                                 multiple=True, label="Auch in diese Monate kopieren (optional)"
-                                 ).props("dense outlined use-chips").classes("w-full mt-2")
+            copy_sel = copy_targets_select(year, month)
 
-            with ui.row().classes("mt-2"):
+            with ui.row().classes("mt-2 w-full items-center"):
+                def _clear() -> None:
+                    with get_session() as s:
+                        _clear_cell(s, cat_id, year, month)
+                    recompute_all()
+                    dlg.close()
+                    matrix.refresh()
+                    ui.notify("Zelle geleert" + (" — Vertragszeilen bleiben erhalten"
+                                                 if generated else ""), type="positive")
+
+                ui.button("Zelle leeren", icon="backspace", on_click=_clear
+                          ).props("flat color=negative").tooltip(
+                    "Wert, Detail-Aufstellung, Notiz und Farbe dieser Zelle entfernen"
+                    + (" (Vertragszeilen bleiben)" if generated else ""))
+                ui.space()
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
                 def _save() -> None:
                     use_list = modal["use_list"]
-                    targets = sorted({month, *[int(m) for m in (copy_sel.value or [])]})
+                    targets = [(year, month), *selected_targets(copy_sel)]
                     with get_session() as s:
-                        for tm in targets:
-                            _apply_cell_content(s, cat_id, year, tm, use_list=use_list, items=items,
+                        for ty, tm in targets:
+                            _apply_cell_content(s, cat_id, ty, tm, use_list=use_list, items=items,
                                                 note=note_in.value, color=modal["color"],
                                                 single_value=single_in.amount)
                     recompute_all()

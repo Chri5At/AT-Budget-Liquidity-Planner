@@ -21,6 +21,7 @@ from __future__ import annotations
 from sqlmodel import Session, select
 
 from ..config import VAT_RATE
+from ..engine.contracts import contract_positions, dump_positions
 from ..engine.cost_cells import recompute_cell_amount
 from ..engine.revenue_cells import cell_total
 from ..models import (
@@ -68,7 +69,15 @@ def convert_cost_values(session: Session, category_id: int, factor: float) -> in
             session.add(e)
             n += 1
     for c in session.exec(select(Contract).where(Contract.category_id == category_id)).all():
-        if c.amount:
+        positions = contract_positions(c)
+        if positions:                     # keep amount == Σ of the scaled positions
+            for p in positions:
+                p["amount"] = _scale(p["amount"], factor)
+            c.positions = dump_positions(positions)
+            c.amount = round(sum(p["amount"] for p in positions), 2)
+            session.add(c)
+            n += 1
+        elif c.amount:
             c.amount = _scale(c.amount, factor)
             session.add(c)
             n += 1

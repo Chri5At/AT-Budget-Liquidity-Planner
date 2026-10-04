@@ -36,10 +36,10 @@ any third party.
 **Never used GitHub before? This is all you need — no Python, no installation.**
 
 1. Open the **[Releases page](https://github.com/Chri5At/AT-Budget-Liquidity-Planner/releases/latest)**.
-2. Under **Assets**, click **`BudgetLiquidity-1.3.2.exe`** — the download starts.
+2. Under **Assets**, click **`BudgetLiquidity-1.3.4.exe`** — the download starts.
    (If you only see a "Source code" zip, the `.exe` is hidden behind the small
    **Assets ▸** triangle — click it to expand the list.)
-3. In your browser's downloads, **double-click** `BudgetLiquidity-1.3.2.exe`.
+3. In your browser's downloads, **double-click** `BudgetLiquidity-1.3.4.exe`.
 4. Windows shows a blue **"Windows protected your PC"** box. This is normal — the
    app is free and open-source but **not code-signed**. Click **More info**, then
    the **Run anyway** button that appears.
@@ -129,7 +129,11 @@ file to anyone — no Python required.
   before the cancellation deadline (yellow 120, red 60 days ahead), and the KPI
   row shows the normalised fixed costs per month and per year. The generated
   cells are read-only in the Kosten tab; hand-entered values in the same cell
-  are kept and added.
+  are kept and added. In the Kosten grid every contract shows up as its own 🔗
+  row under its cost row (plus a "manuell erfasst" row for hand-entered
+  amounts), so a cost entered twice is easy to spot. A contract can optionally
+  be split into price positions (e.g. base rent, service charges, kitchen
+  service); its amount is their sum and each position becomes its own line.
 - **GuV / Budget** (P&L) — contribution-margin statement (CM I/II, EBITDA, EBIT,
   EBT), calculated automatically.
 - **Liquidität** (Liquidity) — cash flow in 15th-of-month / month-end buckets

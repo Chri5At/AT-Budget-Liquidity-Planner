@@ -24,6 +24,7 @@ from ...services.vat_convert import (
 from ..formatting import MONTHS_DE, eur, eur_exact, page_title, years
 from ..grid import DE_NUM_PARSER, fit_grid
 from ..components.amount_input import AmountInput
+from ..components.cell_copy import copy_targets_select, selected_targets
 from ..components.scenario_ui import base_toggle_panel, scenario_select
 from ..components.vat_hint import (
     amount_label,
@@ -135,6 +136,20 @@ def _apply_cell_content(s, stream: RevenueStream, year: int, month: int, *,
     s.commit()
     if use_list:
         _recompute_cell(s, stream, year, month)
+
+
+def _clear_cell(s, stream_id: int, year: int, month: int) -> None:
+    """Reset a cell in one go: value, line breakdown, note and colour."""
+    for e in s.exec(select(RevenueCellEntry).where(
+            RevenueCellEntry.stream_id == stream_id, RevenueCellEntry.year == year,
+            RevenueCellEntry.month == month)).all():
+        s.delete(e)
+    pm = _cell_pm(s, stream_id, year, month)
+    pm.amount = 0.0
+    pm.units = 0.0
+    pm.note = ""
+    pm.color = ""
+    s.commit()
 
 
 def _save_amount_cell(stream_id: int, year: int, month: int, amount: float) -> None:
@@ -666,22 +681,33 @@ def render() -> None:
             list_box.set_visibility(has_list)
             single_in.set_visibility(not has_list)
 
-            # Copy this cell (incl. the whole breakdown) to other months of the same row.
-            copy_sel = ui.select({m: MONTHS_DE[m - 1] for m in range(1, 13) if m != month},
-                                 multiple=True, label="Auch in diese Monate kopieren (optional)"
-                                 ).props("dense outlined use-chips").classes("w-full mt-2")
+            # Copy this cell (incl. the whole breakdown) to other months of the same
+            # row — in this or any later planning year.
+            copy_sel = copy_targets_select(year, month)
 
-            with ui.row().classes("mt-2"):
+            with ui.row().classes("mt-2 w-full items-center"):
+                def _clear() -> None:
+                    with get_session() as s:
+                        _clear_cell(s, stream_id, year, month)
+                    recompute_all()
+                    dlg.close()
+                    matrix.refresh()
+                    ui.notify("Zelle geleert", type="positive")
+
+                ui.button("Zelle leeren", icon="backspace", on_click=_clear
+                          ).props("flat color=negative").tooltip(
+                    "Wert, Detail-Aufstellung, Notiz und Farbe dieser Zelle entfernen")
+                ui.space()
                 ui.button("Abbrechen", on_click=dlg.close).props("flat")
 
                 def _save() -> None:
                     use_list = modal["use_list"]
-                    targets = sorted({month, *[int(m) for m in (copy_sel.value or [])]})
+                    targets = [(year, month), *selected_targets(copy_sel)]
                     with get_session() as s:
                         stream2 = s.get(RevenueStream, stream_id)
-                        for tm in targets:
+                        for ty, tm in targets:
                             _apply_cell_content(
-                                s, stream2, year, tm, use_list=use_list, items=items,
+                                s, stream2, ty, tm, use_list=use_list, items=items,
                                 note=note_in.value, color=modal["color"],
                                 single_value=single_in.amount)
                     recompute_all()

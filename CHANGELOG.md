@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.3.4] — 2026-10-04
+
+### Added
+- **Verträge erscheinen als eigene Zeilen in Ausgaben.** Unter jeder Ausgaben-
+  Position, in die ein Vertrag schreibt, steht jetzt je Vertrag eine schreib-
+  geschützte 🔗-Zeile mit seinen Monatsbeträgen, dazu eine Zeile „✎ manuell
+  erfasst“ für händisch eingetragene Beträge. Die Positionszeile zeigt weiter die
+  Summe; die Unterzeilen zählen nicht noch einmal in Σ. So ist auf einen Blick zu
+  sehen, wenn derselbe Aufwand doppelt erfasst ist (händisch und als Vertrag).
+- **Preis-Positionen je Vertrag.** Im Vertragsdialog lässt sich der Betrag über
+  „Preis-Positionen verwenden“ in mehrere Zeilen (Betrag + Bezeichnung) aufteilen;
+  der Betrag je Intervall ist deren Summe. Jede Position wird in Ausgaben als
+  eigene Detailzeile erzeugt („Vertrag: Position“). Tooltip auf „Betrag“ in der
+  Vertragsliste zeigt die Aufteilung. VSt-Umrechnung skaliert jede Position.
+
+### Fixed
+- **Aktions-Spalten in Verträge & Abos waren unlesbar.** Statt abgeschnittener
+  Wörter („edit“, „folder_open“, „delete“) stehen dort jetzt Symbole: Stift,
+  Ordner, Papierkorb.
+
+## [1.3.3] — 2026-09-24
+
+### Added
+- **„Zelle leeren“ im Zellen-Dialog (Einnahmen + Ausgaben).** Ein Klick entfernt
+  Wert, Detail-Aufstellung, Notiz und Zellenfarbe — statt Farbe zurücksetzen,
+  Schalter „Detail-Aufstellung“ umlegen und Betrag löschen. In Ausgaben bleiben
+  Zeilen aus Verträgen & Abos erhalten (sie werden dort gepflegt).
+- **Zelle in Folgejahre kopieren.** „Auch in diese Monate kopieren“ bietet jetzt
+  jeden Monat des Planungszeitraums an („Mär 2027“), nicht nur die des offenen
+  Jahres — mit Wert, Aufstellung, Notiz und Farbe. Schnellauswahl: „Rest des
+  Jahres“, „gleicher Monat im Folgejahr“, „ganzes Folgejahr“.
+
 ## [1.3.2] — 2026-09-14
 
 ### Fixed

@@ -228,6 +228,9 @@ class Contract(SQLModel, table=True):
     contract_no: str = ""                 # Polizzen-/Vertrags-/Kundennummer
     category_id: int = Field(foreign_key="costcategory.id", index=True)
     amount: float = 0.0                   # per billing interval, entered like a plan cell
+    # Optional price breakdown, JSON list of {"amount": float, "note": str}. When
+    # set, `amount` is kept equal to Σ of the positions (see engine.contracts).
+    positions: str = ""
     cycle: BillingCycle = Field(default=BillingCycle.MONTHLY)
     start: date                           # Vertragsbeginn (= first due unless first_due is set)
     first_due: Optional[date] = None      # first payment, if it differs from the start

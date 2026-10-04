@@ -74,6 +74,8 @@ def _migrate() -> bool:
         # Verträge & Abos: cell lines generated from a Contract carry its id (the
         # `contract` table itself is created by create_all). NULL = entered by hand.
         _add_column_if_missing(conn, "costcellentry", "contract_id", "contract_id INTEGER")
+        # Optional per-contract price breakdown (JSON list of amount/note positions).
+        _add_column_if_missing(conn, "contract", "positions", "positions VARCHAR DEFAULT ''")
         if "salarymonth" in inspect(conn).get_table_names():
             cols = {c["name"] for c in inspect(conn).get_columns("salarymonth")}
             if "special" not in cols:

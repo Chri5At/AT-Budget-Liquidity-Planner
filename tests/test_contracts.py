@@ -530,3 +530,75 @@ def test_a_forked_scenario_keeps_the_contract_amounts_as_its_own_lines():
     assert all(line.contract_id is None for line in copied_lines)   # editable there
     # The base row is still driven by the contract.
     assert _cells(s, cat.id) == {(2026, 8): 320.00, (2027, 8): 320.00}
+
+
+def test_ausgaben_lists_each_contract_as_a_breakdown_row_under_its_position():
+    from app.ui.pages.costs import _data_row, _with_contract_rows
+
+    s = _session()
+    cat = _category(s, "Miete")
+    s.add(CostCellEntry(category_id=cat.id, year=2026, month=8, amount=100.0,
+                        note="Kaution"))
+    s.commit()
+    _contract(s, cat, name="Büro", amount=500.0, cycle=BillingCycle.MONTHLY,
+              start=date(2026, 7, 1))
+    generate_contract_cells(s)
+
+    rows = _with_contract_rows(s, _data_row(s, cat, 2026, "leaf"), 2026, 1)
+
+    assert [r["kind"] for r in rows] == ["leaf", "contract", "manual"]
+    leaf, contract, manual = rows
+    assert leaf["has_contracts"] and leaf["m8"] == 600
+    assert contract["name"] == "Büro"
+    assert [contract[f"m{m}"] for m in (6, 7, 8)] == [0, 500, 500]
+    assert [manual[f"m{m}"] for m in (7, 8)] == [0, 100]
+
+
+def test_a_position_without_contracts_gets_no_breakdown_rows():
+    from app.ui.pages.costs import _data_row, _with_contract_rows
+
+    s = _session()
+    cat = _category(s)
+    rows = _with_contract_rows(s, _data_row(s, cat, 2026, "leaf"), 2026, 1)
+    assert [r["kind"] for r in rows] == ["leaf"] and "has_contracts" not in rows[0]
+
+
+def test_price_positions_become_one_line_each_and_sum_to_the_amount():
+    from app.engine.contracts import contract_positions, dump_positions
+
+    s = _session()
+    cat = _category(s, "Miete")
+    positions = [{"amount": 900.00, "note": "Hauptmietzins"},
+                 {"amount": 250.50, "note": "Betriebskosten"},
+                 {"amount": 0, "note": ""}]                    # empty row is dropped
+    _contract(s, cat, name="Büro", amount=1150.50, cycle=BillingCycle.MONTHLY,
+              start=date(2026, 7, 1), positions=dump_positions(positions))
+    generate_contract_cells(s)
+    generate_contract_cells(s)                                 # idempotent
+
+    july = [(e.amount, e.note) for e in _lines(s) if (e.year, e.month) == (2026, 7)]
+    assert july == [(900.00, "Büro: Hauptmietzins"), (250.50, "Büro: Betriebskosten")]
+    assert _cells(s, cat.id)[(2026, 7)] == 1150.50
+    assert len(contract_positions(s.exec(select(Contract)).one())) == 2
+
+
+def test_broken_positions_json_falls_back_to_the_single_amount():
+    s = _session()
+    cat = _category(s)
+    _contract(s, cat, positions="{not json")
+    generate_contract_cells(s)
+    assert [e.amount for e in _lines(s)] == [320.00, 320.00]
+
+
+def test_vat_conversion_scales_each_position_and_keeps_the_sum():
+    from app.engine.contracts import contract_positions, dump_positions
+    from app.services.vat_convert import convert_cost_values
+
+    s = _session()
+    cat = _category(s)
+    _contract(s, cat, amount=300.0, positions=dump_positions(
+        [{"amount": 120.0, "note": "A"}, {"amount": 180.0, "note": "B"}]))
+    convert_cost_values(s, cat.id, 1 / 1.2)
+    c = s.exec(select(Contract)).one()
+    assert [p["amount"] for p in contract_positions(c)] == [100.0, 150.0]
+    assert c.amount == 250.0
